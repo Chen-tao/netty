@@ -22,8 +22,8 @@ import static io.netty.handler.codec.http.cookie.CookieUtil.stripTrailingSeparat
 import static io.netty.handler.codec.http.cookie.CookieUtil.stripTrailingSeparatorOrNull;
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.util.internal.InternalThreadLocalMap;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
@@ -33,9 +33,6 @@ import java.util.List;
 /**
  * A <a href="http://tools.ietf.org/html/rfc6265">RFC6265</a> compliant cookie encoder to be used client side, so
  * only name=value pairs are sent.
- *
- * User-Agents are not supposed to interpret cookies, so, if present, {@link Cookie#rawValue()} will be used.
- * Otherwise, {@link Cookie#value()} will be used unquoted.
  *
  * Note that multiple cookies are supposed to be sent at once in a single "Cookie" header.
  *
@@ -196,7 +193,7 @@ public final class ClientCookieEncoder extends CookieEncoder {
             if (!cookiesIt.hasNext()) {
                 encode(buf, firstCookie);
             } else {
-                List<Cookie> cookiesList = new ArrayList<Cookie>();
+                List<Cookie> cookiesList = InternalThreadLocalMap.get().arrayList();
                 cookiesList.add(firstCookie);
                 while (cookiesIt.hasNext()) {
                     cookiesList.add(cookiesIt.next());

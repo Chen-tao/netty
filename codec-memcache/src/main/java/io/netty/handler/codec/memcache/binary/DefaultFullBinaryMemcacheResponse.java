@@ -17,10 +17,12 @@ package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The default implementation of a {@link FullBinaryMemcacheResponse}.
  */
+@UnstableApi
 public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResponse
     implements FullBinaryMemcacheResponse {
 
@@ -32,7 +34,7 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
      * @param key    the key to use.
      * @param extras the extras to use.
      */
-    public DefaultFullBinaryMemcacheResponse(String key, ByteBuf extras) {
+    public DefaultFullBinaryMemcacheResponse(ByteBuf key, ByteBuf extras) {
         this(key, extras, Unpooled.buffer(0));
     }
 
@@ -43,7 +45,7 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
      * @param extras  the extras to use.
      * @param content the content of the full request.
      */
-    public DefaultFullBinaryMemcacheResponse(String key, ByteBuf extras,
+    public DefaultFullBinaryMemcacheResponse(ByteBuf key, ByteBuf extras,
         ByteBuf content) {
         super(key, extras);
         if (content == null) {
@@ -51,6 +53,7 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
         }
 
         this.content = content;
+        setTotalBodyLength(keyLength() + extrasLength() + content.readableBytes());
     }
 
     @Override
@@ -59,28 +62,20 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
     }
 
     @Override
-    public int refCnt() {
-        return content.refCnt();
-    }
-
-    @Override
     public FullBinaryMemcacheResponse retain() {
         super.retain();
-        content.retain();
         return this;
     }
 
     @Override
     public FullBinaryMemcacheResponse retain(int increment) {
         super.retain(increment);
-        content.retain(increment);
         return this;
     }
 
     @Override
     public FullBinaryMemcacheResponse touch() {
         super.touch();
-        content.touch();
         return this;
     }
 
@@ -92,32 +87,52 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
     }
 
     @Override
-    public boolean release() {
-        super.release();
-        return content.release();
-    }
-
-    @Override
-    public boolean release(int decrement) {
-        super.release(decrement);
-        return content.release(decrement);
+    protected void deallocate() {
+        super.deallocate();
+        content.release();
     }
 
     @Override
     public FullBinaryMemcacheResponse copy() {
+        ByteBuf key = key();
+        if (key != null) {
+            key = key.copy();
+        }
         ByteBuf extras = extras();
         if (extras != null) {
             extras = extras.copy();
         }
-        return new DefaultFullBinaryMemcacheResponse(key(), extras, content().copy());
+        return new DefaultFullBinaryMemcacheResponse(key, extras, content().copy());
     }
 
     @Override
     public FullBinaryMemcacheResponse duplicate() {
+        ByteBuf key = key();
+        if (key != null) {
+            key = key.duplicate();
+        }
         ByteBuf extras = extras();
         if (extras != null) {
             extras = extras.duplicate();
         }
-        return new DefaultFullBinaryMemcacheResponse(key(), extras, content().duplicate());
+        return new DefaultFullBinaryMemcacheResponse(key, extras, content().duplicate());
+    }
+
+    @Override
+    public FullBinaryMemcacheResponse retainedDuplicate() {
+        return replace(content().retainedDuplicate());
+    }
+
+    @Override
+    public FullBinaryMemcacheResponse replace(ByteBuf content) {
+        ByteBuf key = key();
+        if (key != null) {
+            key = key.retainedDuplicate();
+        }
+        ByteBuf extras = extras();
+        if (extras != null) {
+            extras = extras.retainedDuplicate();
+        }
+        return new DefaultFullBinaryMemcacheResponse(key, extras, content);
     }
 }

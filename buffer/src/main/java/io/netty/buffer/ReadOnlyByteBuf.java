@@ -23,6 +23,7 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ReadOnlyBufferException;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 
@@ -30,7 +31,10 @@ import java.nio.channels.ScatteringByteChannel;
  * A derived buffer which forbids any write requests to its parent.  It is
  * recommended to use {@link Unpooled#unmodifiableBuffer(ByteBuf)}
  * instead of calling the constructor explicitly.
+ *
+ * @deprecated Do not use.
  */
+@Deprecated
 public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
 
     private final ByteBuf buffer;
@@ -47,6 +51,11 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
     }
 
     @Override
+    public boolean isReadOnly() {
+        return true;
+    }
+
+    @Override
     public boolean isWritable() {
         return false;
     }
@@ -57,23 +66,34 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
     }
 
     @Override
+    public int ensureWritable(int minWritableBytes, boolean force) {
+        return 1;
+    }
+
+    @Override
+    public ByteBuf ensureWritable(int minWritableBytes) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     public ByteBuf unwrap() {
         return buffer;
     }
 
     @Override
     public ByteBufAllocator alloc() {
-        return buffer.alloc();
+        return unwrap().alloc();
     }
 
     @Override
+    @Deprecated
     public ByteOrder order() {
-        return buffer.order();
+        return unwrap().order();
     }
 
     @Override
     public boolean isDirect() {
-        return buffer.isDirect();
+        return unwrap().isDirect();
     }
 
     @Override
@@ -93,12 +113,12 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
 
     @Override
     public boolean hasMemoryAddress() {
-        return false;
+        return unwrap().hasMemoryAddress();
     }
 
     @Override
     public long memoryAddress() {
-        throw new ReadOnlyBufferException();
+        return unwrap().memoryAddress();
     }
 
     @Override
@@ -142,6 +162,11 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
     }
 
     @Override
+    public ByteBuf setShortLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setShortLE(int index, int value) {
         throw new ReadOnlyBufferException();
     }
@@ -153,6 +178,11 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
 
     @Override
     protected void _setMedium(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf setMediumLE(int index, int value) {
         throw new ReadOnlyBufferException();
     }
 
@@ -172,6 +202,11 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
     }
 
     @Override
+    public ByteBuf setIntLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setIntLE(int index, int value) {
         throw new ReadOnlyBufferException();
     }
@@ -183,6 +218,11 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
 
     @Override
     protected void _setLong(int index, long value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf setLongLE(int index, long value) {
         throw new ReadOnlyBufferException();
     }
 
@@ -202,33 +242,44 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
     }
 
     @Override
+    public int setBytes(int index, FileChannel in, long position, int length) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     public int getBytes(int index, GatheringByteChannel out, int length)
             throws IOException {
-        return buffer.getBytes(index, out, length);
+        return unwrap().getBytes(index, out, length);
+    }
+
+    @Override
+    public int getBytes(int index, FileChannel out, long position, int length)
+            throws IOException {
+        return unwrap().getBytes(index, out, position, length);
     }
 
     @Override
     public ByteBuf getBytes(int index, OutputStream out, int length)
             throws IOException {
-        buffer.getBytes(index, out, length);
+        unwrap().getBytes(index, out, length);
         return this;
     }
 
     @Override
     public ByteBuf getBytes(int index, byte[] dst, int dstIndex, int length) {
-        buffer.getBytes(index, dst, dstIndex, length);
+        unwrap().getBytes(index, dst, dstIndex, length);
         return this;
     }
 
     @Override
     public ByteBuf getBytes(int index, ByteBuf dst, int dstIndex, int length) {
-        buffer.getBytes(index, dst, dstIndex, length);
+        unwrap().getBytes(index, dst, dstIndex, length);
         return this;
     }
 
     @Override
     public ByteBuf getBytes(int index, ByteBuffer dst) {
-        buffer.getBytes(index, dst);
+        unwrap().getBytes(index, dst);
         return this;
     }
 
@@ -239,121 +290,141 @@ public class ReadOnlyByteBuf extends AbstractDerivedByteBuf {
 
     @Override
     public ByteBuf copy(int index, int length) {
-        return buffer.copy(index, length);
+        return unwrap().copy(index, length);
     }
 
     @Override
     public ByteBuf slice(int index, int length) {
-        return Unpooled.unmodifiableBuffer(buffer.slice(index, length));
+        return Unpooled.unmodifiableBuffer(unwrap().slice(index, length));
     }
 
     @Override
     public byte getByte(int index) {
-        return _getByte(index);
+        return unwrap().getByte(index);
     }
 
     @Override
     protected byte _getByte(int index) {
-        return buffer.getByte(index);
+        return unwrap().getByte(index);
     }
 
     @Override
     public short getShort(int index) {
-        return _getShort(index);
+        return unwrap().getShort(index);
     }
 
     @Override
     protected short _getShort(int index) {
-        return buffer.getShort(index);
+        return unwrap().getShort(index);
+    }
+
+    @Override
+    public short getShortLE(int index) {
+        return unwrap().getShortLE(index);
     }
 
     @Override
     protected short _getShortLE(int index) {
-        return buffer.getShortLE(index);
+        return unwrap().getShortLE(index);
     }
 
     @Override
     public int getUnsignedMedium(int index) {
-        return _getUnsignedMedium(index);
+        return unwrap().getUnsignedMedium(index);
     }
 
     @Override
     protected int _getUnsignedMedium(int index) {
-        return buffer.getUnsignedMedium(index);
+        return unwrap().getUnsignedMedium(index);
+    }
+
+    @Override
+    public int getUnsignedMediumLE(int index) {
+        return unwrap().getUnsignedMediumLE(index);
     }
 
     @Override
     protected int _getUnsignedMediumLE(int index) {
-        return buffer.getUnsignedMediumLE(index);
+        return unwrap().getUnsignedMediumLE(index);
     }
 
     @Override
     public int getInt(int index) {
-        return _getInt(index);
+        return unwrap().getInt(index);
     }
 
     @Override
     protected int _getInt(int index) {
-        return buffer.getInt(index);
+        return unwrap().getInt(index);
+    }
+
+    @Override
+    public int getIntLE(int index) {
+        return unwrap().getIntLE(index);
     }
 
     @Override
     protected int _getIntLE(int index) {
-        return buffer.getIntLE(index);
+        return unwrap().getIntLE(index);
     }
 
     @Override
     public long getLong(int index) {
-        return _getLong(index);
+        return unwrap().getLong(index);
     }
 
     @Override
     protected long _getLong(int index) {
-        return buffer.getLong(index);
+        return unwrap().getLong(index);
+    }
+
+    @Override
+    public long getLongLE(int index) {
+        return unwrap().getLongLE(index);
     }
 
     @Override
     protected long _getLongLE(int index) {
-        return buffer.getLongLE(index);
+        return unwrap().getLongLE(index);
     }
 
     @Override
     public int nioBufferCount() {
-        return buffer.nioBufferCount();
+        return unwrap().nioBufferCount();
     }
 
     @Override
     public ByteBuffer nioBuffer(int index, int length) {
-        return buffer.nioBuffer(index, length).asReadOnlyBuffer();
+        return unwrap().nioBuffer(index, length).asReadOnlyBuffer();
     }
 
     @Override
     public ByteBuffer[] nioBuffers(int index, int length) {
-        return buffer.nioBuffers(index, length);
-    }
-
-    @Override
-    public ByteBuffer internalNioBuffer(int index, int length) {
-        return nioBuffer(index, length);
+        return unwrap().nioBuffers(index, length);
     }
 
     @Override
     public int forEachByte(int index, int length, ByteProcessor processor) {
-        return buffer.forEachByte(index, length, processor);
+        return unwrap().forEachByte(index, length, processor);
     }
 
     @Override
     public int forEachByteDesc(int index, int length, ByteProcessor processor) {
-        return buffer.forEachByteDesc(index, length, processor);
+        return unwrap().forEachByteDesc(index, length, processor);
     }
 
     @Override
     public int capacity() {
-        return buffer.capacity();
+        return unwrap().capacity();
     }
 
     @Override
     public ByteBuf capacity(int newCapacity) {
         throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf asReadOnly() {
+        return this;
     }
 }

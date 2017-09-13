@@ -19,6 +19,7 @@ EXAMPLE_MAP=(
   'http2-client:io.netty.example.http2.helloworld.client.Http2Client'
   'http2-server:io.netty.example.http2.helloworld.server.Http2Server'
   'http2-tiles:io.netty.example.http2.tiles.Launcher'
+  'http2-multiplex-server:io.netty.example.http2.helloworld.multiplex.server.Http2Server'
   'spdy-client:io.netty.example.spdy.client.SpdyClient'
   'spdy-server:io.netty.example.spdy.server.SpdyServer'
   'worldclock-client:io.netty.example.worldclock.WorldClockClient'
@@ -27,6 +28,7 @@ EXAMPLE_MAP=(
   'objectecho-server:io.netty.example.objectecho.ObjectEchoServer'
   'quote-client:org.jboss.netty.example.qotm.QuoteOfTheMomentClient'
   'quote-server:org.jboss.netty.example.qotm.QuoteOfTheMomentServer'
+  'redis-client:io.netty.example.redis.RedisClient'
   'securechat-client:io.netty.example.securechat.SecureChatClient'
   'securechat-server:io.netty.example.securechat.SecureChatServer'
   'telnet-client:io.netty.example.telnet.TelnetClient'
@@ -36,6 +38,7 @@ EXAMPLE_MAP=(
   'memcache-binary-client:io.netty.example.memcache.binary.MemcacheClient'
   'stomp-client:io.netty.example.stomp.StompClient'
   'uptime-client:io.netty.example.uptime.UptimeClient'
+  'uptime-server:io.netty.example.uptime.UptimeServer'
   'sctpecho-client:io.netty.example.sctp.SctpEchoClient'
   'sctpecho-server:io.netty.example.sctp.SctpEchoServer'
   'localecho:io.netty.example.localecho.LocalEcho'
@@ -109,4 +112,4 @@ done
 
 cd "`dirname "$0"`"/example
 echo "[INFO] Running: $EXAMPLE ($EXAMPLE_CLASS $EXAMPLE_ARGS)"
-exec mvn -q -nsu compile exec:exec -Dcheckstyle.skip=true -Dforcenpn="$FORCE_NPN" -DargLine.example="$EXAMPLE_ARGS" -DexampleClass="$EXAMPLE_CLASS"
+exec mvn -q -nsu compile exec:exec -Dcheckstyle.skip=true -Dforbiddenapis.skip=true -Dforcenpn="$FORCE_NPN" -DargLine.example="$EXAMPLE_ARGS" -DexampleClass="$EXAMPLE_CLASS"

@@ -24,6 +24,11 @@ import java.util.List;
 public interface PoolArenaMetric {
 
     /**
+     * Returns the number of thread caches backed by this arena.
+     */
+    int numThreadCaches();
+
+    /**
      * Returns the number of tiny sub-pages for the arena.
      */
     int numTinySubpages();
@@ -127,4 +132,9 @@ public interface PoolArenaMetric {
      * Return the number of currently active huge allocations.
      */
     long numActiveHugeAllocations();
+
+    /**
+     * Return the number of active bytes that are currently allocated by the arena.
+     */
+    long numActiveBytes();
 }

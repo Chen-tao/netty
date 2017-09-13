@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 import java.nio.charset.Charset;
@@ -90,6 +91,16 @@ class WrappedByteBuf extends ByteBuf {
     @Override
     public final ByteBuf unwrap() {
         return buf;
+    }
+
+    @Override
+    public ByteBuf asReadOnly() {
+        return buf.asReadOnly();
+    }
+
+    @Override
+    public boolean isReadOnly() {
+        return buf.isReadOnly();
     }
 
     @Override
@@ -351,6 +362,16 @@ class WrappedByteBuf extends ByteBuf {
     }
 
     @Override
+    public int getBytes(int index, FileChannel out, long position, int length) throws IOException {
+        return buf.getBytes(index, out, position, length);
+    }
+
+    @Override
+    public CharSequence getCharSequence(int index, int length, Charset charset) {
+        return buf.getCharSequence(index, length, charset);
+    }
+
+    @Override
     public ByteBuf setBoolean(int index, boolean value) {
         buf.setBoolean(index, value);
         return this;
@@ -475,9 +496,19 @@ class WrappedByteBuf extends ByteBuf {
     }
 
     @Override
+    public int setBytes(int index, FileChannel in, long position, int length) throws IOException {
+        return buf.setBytes(index, in, position, length);
+    }
+
+    @Override
     public ByteBuf setZero(int index, int length) {
         buf.setZero(index, length);
         return this;
+    }
+
+    @Override
+    public int setCharSequence(int index, CharSequence sequence, Charset charset) {
+        return buf.setCharSequence(index, sequence, charset);
     }
 
     @Override
@@ -591,6 +622,11 @@ class WrappedByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf readRetainedSlice(int length) {
+        return buf.readRetainedSlice(length);
+    }
+
+    @Override
     public ByteBuf readBytes(ByteBuf dst) {
         buf.readBytes(dst);
         return this;
@@ -635,6 +671,16 @@ class WrappedByteBuf extends ByteBuf {
     @Override
     public int readBytes(GatheringByteChannel out, int length) throws IOException {
         return buf.readBytes(out, length);
+    }
+
+    @Override
+    public int readBytes(FileChannel out, long position, int length) throws IOException {
+        return buf.readBytes(out, position, length);
+    }
+
+    @Override
+    public CharSequence readCharSequence(int length, Charset charset) {
+        return buf.readCharSequence(length, charset);
     }
 
     @Override
@@ -768,9 +814,19 @@ class WrappedByteBuf extends ByteBuf {
     }
 
     @Override
+    public int writeBytes(FileChannel in, long position, int length) throws IOException {
+        return buf.writeBytes(in, position, length);
+    }
+
+    @Override
     public ByteBuf writeZero(int length) {
         buf.writeZero(length);
         return this;
+    }
+
+    @Override
+    public int writeCharSequence(CharSequence sequence, Charset charset) {
+        return buf.writeCharSequence(sequence, charset);
     }
 
     @Override
@@ -829,13 +885,28 @@ class WrappedByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf retainedSlice() {
+        return buf.retainedSlice();
+    }
+
+    @Override
     public ByteBuf slice(int index, int length) {
         return buf.slice(index, length);
     }
 
     @Override
+    public ByteBuf retainedSlice(int index, int length) {
+        return buf.retainedSlice(index, length);
+    }
+
+    @Override
     public ByteBuf duplicate() {
         return buf.duplicate();
+    }
+
+    @Override
+    public ByteBuf retainedDuplicate() {
+        return buf.retainedDuplicate();
     }
 
     @Override

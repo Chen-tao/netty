@@ -24,6 +24,7 @@ import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.DefaultEventLoop;
 import io.netty.channel.DefaultEventLoopGroup;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
@@ -36,10 +37,10 @@ import io.netty.resolver.AbstractAddressResolver;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
-import io.netty.util.internal.OneTimeTask;
 import org.junit.AfterClass;
 import org.junit.Test;
 
+import java.net.ConnectException;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
@@ -68,7 +69,6 @@ public class BootstrapTest {
 
     @Test(timeout = 10000)
     public void testBindDeadLock() throws Exception {
-
         final Bootstrap bootstrapA = new Bootstrap();
         bootstrapA.group(groupA);
         bootstrapA.channel(LocalChannel.class);
@@ -105,7 +105,6 @@ public class BootstrapTest {
 
     @Test(timeout = 10000)
     public void testConnectDeadLock() throws Exception {
-
         final Bootstrap bootstrapA = new Bootstrap();
         bootstrapA.group(groupA);
         bootstrapA.channel(LocalChannel.class);
@@ -217,9 +216,22 @@ public class BootstrapTest {
         }
     }
 
+    @Test(expected = ConnectException.class, timeout = 10000)
+    public void testLateRegistrationConnect() throws Exception {
+        EventLoopGroup group = new DelayedEventLoopGroup();
+        try {
+            final Bootstrap bootstrapA = new Bootstrap();
+            bootstrapA.group(group);
+            bootstrapA.channel(LocalChannel.class);
+            bootstrapA.handler(dummyHandler);
+            bootstrapA.connect(LocalAddress.ANY).syncUninterruptibly();
+        } finally {
+            group.shutdownGracefully();
+        }
+    }
+
     @Test
     public void testAsyncResolutionSuccess() throws Exception {
-
         final Bootstrap bootstrapA = new Bootstrap();
         bootstrapA.group(groupA);
         bootstrapA.channel(LocalChannel.class);
@@ -238,7 +250,6 @@ public class BootstrapTest {
 
     @Test
     public void testAsyncResolutionFailure() throws Exception {
-
         final Bootstrap bootstrapA = new Bootstrap();
         bootstrapA.group(groupA);
         bootstrapA.channel(LocalChannel.class);
@@ -260,6 +271,42 @@ public class BootstrapTest {
         assertThat(connectFuture.channel().isOpen(), is(false));
     }
 
+    @Test
+    public void testChannelFactoryFailureNotifiesPromise() throws Exception {
+        final RuntimeException exception = new RuntimeException("newChannel crash");
+
+        final Bootstrap bootstrap = new Bootstrap()
+                .handler(dummyHandler)
+                .group(groupA)
+                .channelFactory(new ChannelFactory<Channel>() {
+            @Override
+            public Channel newChannel() {
+                throw exception;
+            }
+        });
+
+        ChannelFuture connectFuture = bootstrap.connect(LocalAddress.ANY);
+
+        // Should fail with the RuntimeException.
+        assertThat(connectFuture.await(10000), is(true));
+        assertThat(connectFuture.cause(), sameInstance((Throwable) exception));
+        assertThat(connectFuture.channel(), is(nullValue()));
+    }
+
+    private static final class DelayedEventLoopGroup extends DefaultEventLoop {
+        @Override
+        public ChannelFuture register(final Channel channel, final ChannelPromise promise) {
+            // Delay registration
+            execute(new Runnable() {
+                @Override
+                public void run() {
+                    DelayedEventLoopGroup.super.register(channel, promise);
+                }
+            });
+            return promise;
+        }
+    }
+
     private static final class TestEventLoopGroup extends DefaultEventLoopGroup {
 
         ChannelPromise promise;
@@ -273,6 +320,11 @@ public class BootstrapTest {
             super.register(channel).syncUninterruptibly();
             promise = channel.newPromise();
             return promise;
+        }
+
+        @Override
+        public ChannelFuture register(ChannelPromise promise) {
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -304,7 +356,7 @@ public class BootstrapTest {
                 @Override
                 protected void doResolve(
                         final SocketAddress unresolvedAddress, final Promise<SocketAddress> promise) {
-                    executor().execute(new OneTimeTask() {
+                    executor().execute(new Runnable() {
                         @Override
                         public void run() {
                             if (success) {
@@ -320,7 +372,7 @@ public class BootstrapTest {
                 protected void doResolveAll(
                         final SocketAddress unresolvedAddress, final Promise<List<SocketAddress>> promise)
                         throws Exception {
-                    executor().execute(new OneTimeTask() {
+                    executor().execute(new Runnable() {
                         @Override
                         public void run() {
                             if (success) {

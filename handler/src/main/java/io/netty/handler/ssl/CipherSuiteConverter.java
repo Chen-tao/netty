@@ -43,7 +43,7 @@ final class CipherSuiteConverter {
      * C - bulk cipher
      * D - HMAC algorithm
      *
-     * This regular expression assumees that:
+     * This regular expression assumes that:
      *
      * 1) A is always TLS or SSL, and
      * 2) D is always a single word.
@@ -69,7 +69,7 @@ final class CipherSuiteConverter {
                     "^(?:(" + // BEGIN handshake algorithm
                         "(?:(?:EXP-)?" +
                             "(?:" +
-                                "(?:DHE|EDH|ECDH|ECDHE|SRP)-(?:DSS|RSA|ECDSA)|" +
+                                "(?:DHE|EDH|ECDH|ECDHE|SRP|RSA)-(?:DSS|RSA|ECDSA|PSK)|" +
                                 "(?:ADH|AECDH|KRB5|PSK|SRP)" +
                             ')' +
                         ")|" +
@@ -194,8 +194,10 @@ final class CipherSuiteConverter {
         String handshakeAlgo = toOpenSslHandshakeAlgo(m.group(1));
         String bulkCipher = toOpenSslBulkCipher(m.group(2));
         String hmacAlgo = toOpenSslHmacAlgo(m.group(3));
-        if (handshakeAlgo.length() == 0) {
+        if (handshakeAlgo.isEmpty()) {
             return bulkCipher + '-' + hmacAlgo;
+        } else if (bulkCipher.contains("CHACHA20")) {
+            return handshakeAlgo + '-' + bulkCipher;
         } else {
             return handshakeAlgo + '-' + bulkCipher + '-' + hmacAlgo;
         }
@@ -214,7 +216,7 @@ final class CipherSuiteConverter {
         }
 
         if (export) {
-            if (handshakeAlgo.length() == 0) {
+            if (handshakeAlgo.isEmpty()) {
                 handshakeAlgo = "EXP";
             } else {
                 handshakeAlgo = "EXP-" + handshakeAlgo;
@@ -276,6 +278,11 @@ final class CipherSuiteConverter {
         Map<String, String> p2j = o2j.get(openSslCipherSuite);
         if (p2j == null) {
             p2j = cacheFromOpenSsl(openSslCipherSuite);
+            // This may happen if this method is queried when OpenSSL doesn't yet have a cipher setup. It will return
+            // "(NONE)" in this case.
+            if (p2j == null) {
+                return null;
+            }
         }
 
         String javaCipherSuite = p2j.get(protocol);
@@ -337,11 +344,16 @@ final class CipherSuiteConverter {
         String bulkCipher = toJavaBulkCipher(m.group(2), export);
         String hmacAlgo = toJavaHmacAlgo(m.group(3));
 
-        return handshakeAlgo + "_WITH_" + bulkCipher + '_' + hmacAlgo;
+        String javaCipherSuite = handshakeAlgo + "_WITH_" + bulkCipher + '_' + hmacAlgo;
+        // For historical reasons the CHACHA20 ciphers do not follow OpenSSL's custom naming convention and omits the
+        // HMAC algorithm portion of the name. There is currently no way to derive this information because it is
+        // omitted from the OpenSSL cipher name, but they currently all use SHA256 for HMAC [1].
+        // [1] https://www.openssl.org/docs/man1.1.0/apps/ciphers.html
+        return bulkCipher.contains("CHACHA20") ? javaCipherSuite + "_SHA256" : javaCipherSuite;
     }
 
     private static String toJavaHandshakeAlgo(String handshakeAlgo, boolean export) {
-        if (handshakeAlgo.length() == 0) {
+        if (handshakeAlgo.isEmpty()) {
             handshakeAlgo = "RSA";
         } else if ("ADH".equals(handshakeAlgo)) {
             handshakeAlgo = "DH_anon";

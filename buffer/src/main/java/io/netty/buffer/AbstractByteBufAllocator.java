@@ -16,8 +16,8 @@
 
 package io.netty.buffer;
 
-import io.netty.util.ResourceLeak;
 import io.netty.util.ResourceLeakDetector;
+import io.netty.util.ResourceLeakTracker;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 
@@ -25,21 +25,23 @@ import io.netty.util.internal.StringUtil;
  * Skeletal {@link ByteBufAllocator} implementation to extend.
  */
 public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
-    private static final int DEFAULT_INITIAL_CAPACITY = 256;
+    static final int DEFAULT_INITIAL_CAPACITY = 256;
+    static final int DEFAULT_MAX_CAPACITY = Integer.MAX_VALUE;
     static final int DEFAULT_MAX_COMPONENTS = 16;
+    static final int CALCULATE_THRESHOLD = 1048576 * 4; // 4 MiB page
 
     protected static ByteBuf toLeakAwareBuffer(ByteBuf buf) {
-        ResourceLeak leak;
+        ResourceLeakTracker<ByteBuf> leak;
         switch (ResourceLeakDetector.getLevel()) {
             case SIMPLE:
-                leak = AbstractByteBuf.leakDetector.open(buf);
+                leak = AbstractByteBuf.leakDetector.track(buf);
                 if (leak != null) {
                     buf = new SimpleLeakAwareByteBuf(buf, leak);
                 }
                 break;
             case ADVANCED:
             case PARANOID:
-                leak = AbstractByteBuf.leakDetector.open(buf);
+                leak = AbstractByteBuf.leakDetector.track(buf);
                 if (leak != null) {
                     buf = new AdvancedLeakAwareByteBuf(buf, leak);
                 }
@@ -51,17 +53,17 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
     }
 
     protected static CompositeByteBuf toLeakAwareBuffer(CompositeByteBuf buf) {
-        ResourceLeak leak;
+        ResourceLeakTracker<ByteBuf> leak;
         switch (ResourceLeakDetector.getLevel()) {
             case SIMPLE:
-                leak = AbstractByteBuf.leakDetector.open(buf);
+                leak = AbstractByteBuf.leakDetector.track(buf);
                 if (leak != null) {
                     buf = new SimpleLeakAwareCompositeByteBuf(buf, leak);
                 }
                 break;
             case ADVANCED:
             case PARANOID:
-                leak = AbstractByteBuf.leakDetector.open(buf);
+                leak = AbstractByteBuf.leakDetector.track(buf);
                 if (leak != null) {
                     buf = new AdvancedLeakAwareCompositeByteBuf(buf, leak);
                 }
@@ -143,12 +145,12 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
 
     @Override
     public ByteBuf heapBuffer() {
-        return heapBuffer(DEFAULT_INITIAL_CAPACITY, Integer.MAX_VALUE);
+        return heapBuffer(DEFAULT_INITIAL_CAPACITY, DEFAULT_MAX_CAPACITY);
     }
 
     @Override
     public ByteBuf heapBuffer(int initialCapacity) {
-        return heapBuffer(initialCapacity, Integer.MAX_VALUE);
+        return heapBuffer(initialCapacity, DEFAULT_MAX_CAPACITY);
     }
 
     @Override
@@ -162,12 +164,12 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
 
     @Override
     public ByteBuf directBuffer() {
-        return directBuffer(DEFAULT_INITIAL_CAPACITY, Integer.MAX_VALUE);
+        return directBuffer(DEFAULT_INITIAL_CAPACITY, DEFAULT_MAX_CAPACITY);
     }
 
     @Override
     public ByteBuf directBuffer(int initialCapacity) {
-        return directBuffer(initialCapacity, Integer.MAX_VALUE);
+        return directBuffer(initialCapacity, DEFAULT_MAX_CAPACITY);
     }
 
     @Override
@@ -217,7 +219,7 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
 
     private static void validate(int initialCapacity, int maxCapacity) {
         if (initialCapacity < 0) {
-            throw new IllegalArgumentException("initialCapacity: " + initialCapacity + " (expectd: 0+)");
+            throw new IllegalArgumentException("initialCapacity: " + initialCapacity + " (expected: 0+)");
         }
         if (initialCapacity > maxCapacity) {
             throw new IllegalArgumentException(String.format(
@@ -244,14 +246,14 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
     @Override
     public int calculateNewCapacity(int minNewCapacity, int maxCapacity) {
         if (minNewCapacity < 0) {
-            throw new IllegalArgumentException("minNewCapacity: " + minNewCapacity + " (expectd: 0+)");
+            throw new IllegalArgumentException("minNewCapacity: " + minNewCapacity + " (expected: 0+)");
         }
         if (minNewCapacity > maxCapacity) {
             throw new IllegalArgumentException(String.format(
                     "minNewCapacity: %d (expected: not greater than maxCapacity(%d)",
                     minNewCapacity, maxCapacity));
         }
-        final int threshold = 1048576 * 4; // 4 MiB page
+        final int threshold = CALCULATE_THRESHOLD; // 4 MiB page
 
         if (minNewCapacity == threshold) {
             return threshold;

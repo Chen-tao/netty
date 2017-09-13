@@ -16,12 +16,17 @@ package io.netty.handler.codec.http2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.base64.Base64;
 import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpServerUpgradeHandler;
 import io.netty.util.CharsetUtil;
+import io.netty.util.internal.UnstableApi;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.nio.CharBuffer;
 import java.util.Collection;
@@ -29,7 +34,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static io.netty.handler.codec.base64.Base64Dialect.URL_SAFE;
-import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
 import static io.netty.handler.codec.http2.Http2CodecUtil.FRAME_HEADER_LENGTH;
 import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_SETTINGS_HEADER;
 import static io.netty.handler.codec.http2.Http2CodecUtil.writeFrameHeader;
@@ -39,13 +43,16 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
 /**
  * Server-side codec for performing a cleartext upgrade from HTTP/1.x to HTTP/2.
  */
+@UnstableApi
 public class Http2ServerUpgradeCodec implements HttpServerUpgradeHandler.UpgradeCodec {
 
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(Http2ServerUpgradeCodec.class);
     private static final List<CharSequence> REQUIRED_UPGRADE_HEADERS =
             Collections.singletonList(HTTP_UPGRADE_SETTINGS_HEADER);
 
     private final String handlerName;
     private final Http2ConnectionHandler connectionHandler;
+    private final ChannelHandler upgradeToHandler;
     private final Http2FrameReader frameReader;
 
     /**
@@ -59,6 +66,16 @@ public class Http2ServerUpgradeCodec implements HttpServerUpgradeHandler.Upgrade
     }
 
     /**
+     * Creates the codec using a default name for the connection handler when adding to the
+     * pipeline.
+     *
+     * @param http2Codec the HTTP/2 multiplexing handler.
+     */
+    public Http2ServerUpgradeCodec(Http2MultiplexCodec http2Codec) {
+        this(null, http2Codec);
+    }
+
+    /**
      * Creates the codec providing an upgrade to the given handler for HTTP/2.
      *
      * @param handlerName the name of the HTTP/2 connection handler to be used in the pipeline,
@@ -66,8 +83,43 @@ public class Http2ServerUpgradeCodec implements HttpServerUpgradeHandler.Upgrade
      * @param connectionHandler the HTTP/2 connection handler
      */
     public Http2ServerUpgradeCodec(String handlerName, Http2ConnectionHandler connectionHandler) {
+        this(handlerName, connectionHandler, connectionHandler);
+    }
+
+    /**
+     * Creates the codec providing an upgrade to the given handler for HTTP/2.
+     *
+     * @param handlerName the name of the HTTP/2 connection handler to be used in the pipeline.
+     * @param http2Codec the HTTP/2 multiplexing handler.
+     */
+    public Http2ServerUpgradeCodec(String handlerName, Http2MultiplexCodec http2Codec) {
+        this(handlerName, http2Codec, http2Codec);
+    }
+
+    /**
+     * Creates the codec using a default name for the connection handler when adding to the
+     * pipeline.
+     *
+     * @param http2Codec the HTTP/2 frame handler.
+     * @param handlers the handlers that will handle the {@link Http2Frame}s.
+     */
+    public Http2ServerUpgradeCodec(final Http2FrameCodec http2Codec, final ChannelHandler... handlers) {
+        this(null, http2Codec, new ChannelHandlerAdapter() {
+
+            @Override
+            public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+                ctx.pipeline().addLast(http2Codec);
+                ctx.pipeline().addLast(handlers);
+                ctx.pipeline().remove(this);
+            }
+        });
+    }
+
+    Http2ServerUpgradeCodec(String handlerName, Http2ConnectionHandler connectionHandler,
+            ChannelHandler upgradeToHandler) {
         this.handlerName = handlerName;
         this.connectionHandler = checkNotNull(connectionHandler, "connectionHandler");
+        this.upgradeToHandler = checkNotNull(upgradeToHandler, "upgradeToHandler");
         frameReader = new DefaultHttp2FrameReader();
     }
 
@@ -77,8 +129,8 @@ public class Http2ServerUpgradeCodec implements HttpServerUpgradeHandler.Upgrade
     }
 
     @Override
-    public void prepareUpgradeResponse(ChannelHandlerContext ctx, FullHttpRequest upgradeRequest,
-            FullHttpResponse upgradeResponse) {
+    public boolean prepareUpgradeResponse(ChannelHandlerContext ctx, FullHttpRequest upgradeRequest,
+            HttpHeaders headers) {
         try {
             // Decode the HTTP2-Settings header and set the settings on the handler to make
             // sure everything is fine with the request.
@@ -89,19 +141,18 @@ public class Http2ServerUpgradeCodec implements HttpServerUpgradeHandler.Upgrade
             }
             Http2Settings settings = decodeSettingsHeader(ctx, upgradeHeaders.get(0));
             connectionHandler.onHttpServerUpgrade(settings);
-            // Everything looks good, no need to modify the response.
-        } catch (Throwable e) {
-            // Send a failed response back to the client.
-            upgradeResponse.setStatus(BAD_REQUEST);
-            upgradeResponse.headers().clear();
+            // Everything looks good.
+            return true;
+        } catch (Throwable cause) {
+            logger.info("Error during upgrade to HTTP/2", cause);
+            return false;
         }
     }
 
     @Override
-    public void upgradeTo(final ChannelHandlerContext ctx, FullHttpRequest upgradeRequest,
-            FullHttpResponse upgradeResponse) {
+    public void upgradeTo(final ChannelHandlerContext ctx, FullHttpRequest upgradeRequest) {
         // Add the HTTP/2 connection handler to the pipeline immediately following the current handler.
-        ctx.pipeline().addAfter(ctx.name(), handlerName, connectionHandler);
+        ctx.pipeline().addAfter(ctx.name(), handlerName, upgradeToHandler);
     }
 
     /**

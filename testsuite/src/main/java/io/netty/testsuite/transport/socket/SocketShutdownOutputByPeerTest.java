@@ -17,9 +17,11 @@ package io.netty.testsuite.transport.socket;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.util.internal.SocketUtils;
 import io.netty.channel.socket.ChannelInputShutdownEvent;
 import io.netty.channel.socket.SocketChannel;
 import org.junit.Test;
@@ -42,10 +44,11 @@ public class SocketShutdownOutputByPeerTest extends AbstractServerSocketTest {
     public void testShutdownOutput(ServerBootstrap sb) throws Throwable {
         TestHandler h = new TestHandler();
         Socket s = new Socket();
+        Channel sc = null;
         try {
-            sb.childHandler(h).childOption(ChannelOption.ALLOW_HALF_CLOSURE, true).bind().sync();
+            sc = sb.childHandler(h).childOption(ChannelOption.ALLOW_HALF_CLOSURE, true).bind().sync().channel();
 
-            s.connect(addr, 10000);
+            SocketUtils.connect(s, sc.localAddress(), 10000);
             s.getOutputStream().write(1);
 
             assertEquals(1, (int) h.queue.take());
@@ -67,6 +70,9 @@ public class SocketShutdownOutputByPeerTest extends AbstractServerSocketTest {
             Thread.sleep(100);
             assertEquals(1, h.halfClosureCount.intValue());
         } finally {
+            if (sc != null) {
+                sc.close();
+            }
             s.close();
         }
     }
@@ -79,10 +85,11 @@ public class SocketShutdownOutputByPeerTest extends AbstractServerSocketTest {
     public void testShutdownOutputWithoutOption(ServerBootstrap sb) throws Throwable {
         TestHandler h = new TestHandler();
         Socket s = new Socket();
+        Channel sc = null;
         try {
-            sb.childHandler(h).bind().sync();
+            sc = sb.childHandler(h).bind().sync().channel();
 
-            s.connect(addr, 10000);
+            SocketUtils.connect(s, sc.localAddress(), 10000);
             s.getOutputStream().write(1);
 
             assertEquals(1, (int) h.queue.take());
@@ -105,6 +112,9 @@ public class SocketShutdownOutputByPeerTest extends AbstractServerSocketTest {
             Thread.sleep(100);
             assertEquals(0, h.halfClosureCount.intValue());
         } finally {
+            if (sc != null) {
+                sc.close();
+            }
             s.close();
         }
     }

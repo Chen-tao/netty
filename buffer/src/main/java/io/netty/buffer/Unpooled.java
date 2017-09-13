@@ -38,7 +38,7 @@ import java.util.List;
  * {@link ByteBuf} heapBuffer    = buffer(128);
  * {@link ByteBuf} directBuffer  = directBuffer(256);
  * {@link ByteBuf} wrappedBuffer = wrappedBuffer(new byte[128], new byte[256]);
- * {@link ByteBuf} copiedBuffe r = copiedBuffer({@link ByteBuffer}.allocate(128));
+ * {@link ByteBuf} copiedBuffer  = copiedBuffer({@link ByteBuffer}.allocate(128));
  * </pre>
  *
  * <h3>Allocating a new buffer</h3>
@@ -183,7 +183,7 @@ public final class Unpooled {
         if (!buffer.hasRemaining()) {
             return EMPTY_BUFFER;
         }
-        if (buffer.hasArray()) {
+        if (!buffer.isDirect() && buffer.hasArray()) {
             return wrappedBuffer(
                     buffer.array(),
                     buffer.arrayOffset() + buffer.position(),
@@ -205,6 +205,14 @@ public final class Unpooled {
                 return new UnpooledDirectByteBuf(ALLOC, buffer, buffer.remaining());
             }
         }
+    }
+
+    /**
+     * Creates a new buffer which wraps the specified memory address. If {@code doFree} is true the
+     * memoryAddress will automatically be freed once the reference count of the {@link ByteBuf} reaches {@code 0}.
+     */
+    public static ByteBuf wrappedBuffer(long memoryAddress, int size, boolean doFree) {
+        return new WrappedUnpooledUnsafeDirectByteBuf(ALLOC, memoryAddress, size, doFree);
     }
 
     /**
@@ -309,13 +317,14 @@ public final class Unpooled {
             }
             break;
         default:
-            for (ByteBuf b: buffers) {
-                if (b.isReadable()) {
-                    return new CompositeByteBuf(ALLOC, false, maxNumComponents, buffers);
-                } else {
-                    b.release();
+            for (int i = 0; i < buffers.length; i++) {
+                ByteBuf buf = buffers[i];
+                if (buf.isReadable()) {
+                    return new CompositeByteBuf(ALLOC, false, maxNumComponents, buffers, i, buffers.length);
                 }
+                buf.release();
             }
+            break;
         }
         return EMPTY_BUFFER;
     }
@@ -666,7 +675,7 @@ public final class Unpooled {
     }
 
     private static ByteBuf copiedBuffer(CharBuffer buffer, Charset charset) {
-        return ByteBufUtil.encodeString0(ALLOC, true, buffer, charset);
+        return ByteBufUtil.encodeString0(ALLOC, true, buffer, charset, 0);
     }
 
     /**
@@ -674,7 +683,10 @@ public final class Unpooled {
      * on the specified {@code buffer}.  The new buffer has the same
      * {@code readerIndex} and {@code writerIndex} with the specified
      * {@code buffer}.
+     *
+     * @deprecated Use {@link ByteBuf#asReadOnly()}.
      */
+    @Deprecated
     public static ByteBuf unmodifiableBuffer(ByteBuf buffer) {
         ByteOrder endianness = buffer.order();
         if (endianness == BIG_ENDIAN) {

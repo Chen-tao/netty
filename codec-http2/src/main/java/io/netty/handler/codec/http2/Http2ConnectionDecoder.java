@@ -16,6 +16,7 @@ package io.netty.handler.codec.http2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.internal.UnstableApi;
 
 import java.io.Closeable;
 import java.util.List;
@@ -26,6 +27,7 @@ import java.util.List;
  * application-specific processing. Note that frames of an unknown type (i.e. HTTP/2 extensions)
  * will skip all protocol checks and be given directly to the listener for processing.
  */
+@UnstableApi
 public interface Http2ConnectionDecoder extends Closeable {
 
     /**
@@ -64,11 +66,6 @@ public interface Http2ConnectionDecoder extends Closeable {
      * Gets the local settings for this endpoint of the HTTP/2 connection.
      */
     Http2Settings localSettings();
-
-    /**
-     * Sets the local settings for this endpoint of the HTTP/2 connection.
-     */
-    void localSettings(Http2Settings settings) throws Http2Exception;
 
     /**
      * Indicates whether or not the first initial {@code SETTINGS} frame was received from the remote endpoint.

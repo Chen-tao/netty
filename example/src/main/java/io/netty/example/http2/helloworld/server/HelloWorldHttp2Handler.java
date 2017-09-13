@@ -18,6 +18,10 @@ package io.netty.example.http2.helloworld.server;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpScheme;
 import io.netty.handler.codec.http.HttpServerUpgradeHandler;
 import io.netty.handler.codec.http2.DefaultHttp2Headers;
 import io.netty.handler.codec.http2.Http2ConnectionDecoder;
@@ -27,12 +31,10 @@ import io.netty.handler.codec.http2.Http2Flags;
 import io.netty.handler.codec.http2.Http2FrameListener;
 import io.netty.handler.codec.http2.Http2Headers;
 import io.netty.handler.codec.http2.Http2Settings;
-import io.netty.util.AsciiString;
 import io.netty.util.CharsetUtil;
 
 import static io.netty.buffer.Unpooled.copiedBuffer;
 import static io.netty.buffer.Unpooled.unreleasableBuffer;
-import static io.netty.example.http2.Http2ExampleUtil.UPGRADE_RESPONSE_HEADER;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 
 /**
@@ -47,6 +49,18 @@ public final class HelloWorldHttp2Handler extends Http2ConnectionHandler impleme
         super(decoder, encoder, initialSettings);
     }
 
+    private static Http2Headers http1HeadersToHttp2Headers(FullHttpRequest request) {
+        CharSequence host = request.headers().get(HttpHeaderNames.HOST);
+        Http2Headers http2Headers = new DefaultHttp2Headers()
+                .method(HttpMethod.GET.asciiName())
+                .path(request.uri())
+                .scheme(HttpScheme.HTTP.name());
+        if (host != null) {
+            http2Headers.authority(host);
+        }
+        return http2Headers;
+    }
+
     /**
      * Handles the cleartext HTTP upgrade event. If an upgrade occurred, sends a simple response via HTTP/2
      * on stream 1 (the stream specifically reserved for cleartext HTTP upgrade).
@@ -54,11 +68,9 @@ public final class HelloWorldHttp2Handler extends Http2ConnectionHandler impleme
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         if (evt instanceof HttpServerUpgradeHandler.UpgradeEvent) {
-            // Write an HTTP/2 response to the upgrade request
-            Http2Headers headers =
-                    new DefaultHttp2Headers().status(OK.codeAsText())
-                    .set(new AsciiString(UPGRADE_RESPONSE_HEADER), new AsciiString("true"));
-            encoder().writeHeaders(ctx, 1, headers, 0, true, ctx.newPromise());
+            HttpServerUpgradeHandler.UpgradeEvent upgradeEvent =
+                    (HttpServerUpgradeHandler.UpgradeEvent) evt;
+            onHeadersRead(ctx, 1, http1HeadersToHttp2Headers(upgradeEvent.upgradeRequest()), 0 , true);
         }
         super.userEventTriggered(ctx, evt);
     }
@@ -78,7 +90,8 @@ public final class HelloWorldHttp2Handler extends Http2ConnectionHandler impleme
         Http2Headers headers = new DefaultHttp2Headers().status(OK.codeAsText());
         encoder().writeHeaders(ctx, streamId, headers, 0, false, ctx.newPromise());
         encoder().writeData(ctx, streamId, payload, 0, true, ctx.newPromise());
-        ctx.flush();
+
+        // no need to call flush as channelReadComplete(...) will take care of it.
     }
 
     @Override

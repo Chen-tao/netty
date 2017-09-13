@@ -71,7 +71,7 @@ import static io.netty.handler.codec.http.HttpVersion.*;
  * <ol>
  * <li>Request #1 returns the content of {@code /file1.txt}.</li>
  * <li>Contents of {@code /file1.txt} is cached by the browser.</li>
- * <li>Request #2 for {@code /file1.txt} does return the contents of the
+ * <li>Request #2 for {@code /file1.txt} does not return the contents of the
  *     file again. Rather, a 304 Not Modified is returned. This tells the
  *     browser to use the contents stored in its cache.</li>
  * <li>The server knows the file has not been modified because the
@@ -137,7 +137,7 @@ public class HttpStaticFileServerHandler extends SimpleChannelInboundHandler<Ful
 
         if (file.isDirectory()) {
             if (uri.endsWith("/")) {
-                sendListing(ctx, file);
+                sendListing(ctx, file, uri);
             } else {
                 sendRedirect(ctx, uri + '/');
             }
@@ -262,16 +262,15 @@ public class HttpStaticFileServerHandler extends SimpleChannelInboundHandler<Ful
         return SystemPropertyUtil.get("user.dir") + File.separator + uri;
     }
 
-    private static final Pattern ALLOWED_FILE_NAME = Pattern.compile("[A-Za-z0-9][-_A-Za-z0-9\\.]*");
+    private static final Pattern ALLOWED_FILE_NAME = Pattern.compile("[^-\\._]?[^<>&\\\"]*");
 
-    private static void sendListing(ChannelHandlerContext ctx, File dir) {
+    private static void sendListing(ChannelHandlerContext ctx, File dir, String dirPath) {
         FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, OK);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=UTF-8");
 
-        String dirPath = dir.getPath();
         StringBuilder buf = new StringBuilder()
             .append("<!DOCTYPE html>\r\n")
-            .append("<html><head><title>")
+            .append("<html><head><meta charset='utf-8' /><title>")
             .append("Listing of: ")
             .append(dirPath)
             .append("</title></head><body>\r\n")

@@ -121,6 +121,8 @@ public class SocketSslClientRenegotiateTest extends AbstractSocketTest {
 
     @Test(timeout = 30000)
     public void testSslRenegotiationRejected() throws Throwable {
+        // BoringSSL does not support renegotiation intentionally.
+        Assume.assumeFalse("BoringSSL".equals(OpenSsl.versionString()));
         Assume.assumeTrue(OpenSsl.isAvailable());
         run();
     }
@@ -153,7 +155,7 @@ public class SocketSslClientRenegotiateTest extends AbstractSocketTest {
         });
 
         Channel sc = sb.bind().sync().channel();
-        cb.connect().sync();
+        cb.connect(sc.localAddress()).sync();
 
         Future<Channel> clientHandshakeFuture = clientSslHandler.handshakeFuture();
         clientHandshakeFuture.sync();

@@ -22,6 +22,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 import java.nio.charset.Charset;
@@ -333,8 +334,18 @@ class WrappedCompositeByteBuf extends CompositeByteBuf {
     }
 
     @Override
+    public ByteBuf retainedSlice() {
+        return wrapped.retainedSlice();
+    }
+
+    @Override
     public ByteBuf slice(int index, int length) {
         return wrapped.slice(index, length);
+    }
+
+    @Override
+    public ByteBuf retainedSlice(int index, int length) {
+        return wrapped.retainedSlice(index, length);
     }
 
     @Override
@@ -418,8 +429,18 @@ class WrappedCompositeByteBuf extends CompositeByteBuf {
     }
 
     @Override
+    public ByteBuf retainedDuplicate() {
+        return wrapped.retainedDuplicate();
+    }
+
+    @Override
     public ByteBuf readSlice(int length) {
         return wrapped.readSlice(length);
+    }
+
+    @Override
+    public ByteBuf readRetainedSlice(int length) {
+        return wrapped.readRetainedSlice(length);
     }
 
     @Override
@@ -495,6 +516,30 @@ class WrappedCompositeByteBuf extends CompositeByteBuf {
     @Override
     public CompositeByteBuf addComponents(int cIndex, Iterable<ByteBuf> buffers) {
         wrapped.addComponents(cIndex, buffers);
+        return this;
+    }
+
+    @Override
+    public CompositeByteBuf addComponent(boolean increaseWriterIndex, ByteBuf buffer) {
+        wrapped.addComponent(increaseWriterIndex, buffer);
+        return this;
+    }
+
+    @Override
+    public CompositeByteBuf addComponents(boolean increaseWriterIndex, ByteBuf... buffers) {
+        wrapped.addComponents(increaseWriterIndex, buffers);
+        return this;
+    }
+
+    @Override
+    public CompositeByteBuf addComponents(boolean increaseWriterIndex, Iterable<ByteBuf> buffers) {
+        wrapped.addComponents(increaseWriterIndex, buffers);
+        return this;
+    }
+
+    @Override
+    public CompositeByteBuf addComponent(boolean increaseWriterIndex, int cIndex, ByteBuf buffer) {
+        wrapped.addComponent(increaseWriterIndex, cIndex, buffer);
         return this;
     }
 
@@ -1007,6 +1052,61 @@ class WrappedCompositeByteBuf extends CompositeByteBuf {
     public CompositeByteBuf readBytes(OutputStream out, int length) throws IOException {
         wrapped.readBytes(out, length);
         return this;
+    }
+
+    @Override
+    public int getBytes(int index, FileChannel out, long position, int length) throws IOException {
+        return wrapped.getBytes(index, out, position, length);
+    }
+
+    @Override
+    public int setBytes(int index, FileChannel in, long position, int length) throws IOException {
+        return wrapped.setBytes(index, in, position, length);
+    }
+
+    @Override
+    public boolean isReadOnly() {
+        return wrapped.isReadOnly();
+    }
+
+    @Override
+    public ByteBuf asReadOnly() {
+        return wrapped.asReadOnly();
+    }
+
+    @Override
+    protected SwappedByteBuf newSwappedByteBuf() {
+        return wrapped.newSwappedByteBuf();
+    }
+
+    @Override
+    public CharSequence getCharSequence(int index, int length, Charset charset) {
+        return wrapped.getCharSequence(index, length, charset);
+    }
+
+    @Override
+    public CharSequence readCharSequence(int length, Charset charset) {
+        return wrapped.readCharSequence(length, charset);
+    }
+
+    @Override
+    public int setCharSequence(int index, CharSequence sequence, Charset charset) {
+        return wrapped.setCharSequence(index, sequence, charset);
+    }
+
+    @Override
+    public int readBytes(FileChannel out, long position, int length) throws IOException {
+        return wrapped.readBytes(out, position, length);
+    }
+
+    @Override
+    public int writeBytes(FileChannel in, long position, int length) throws IOException {
+        return wrapped.writeBytes(in, position, length);
+    }
+
+    @Override
+    public int writeCharSequence(CharSequence sequence, Charset charset) {
+        return wrapped.writeCharSequence(sequence, charset);
     }
 
     @Override

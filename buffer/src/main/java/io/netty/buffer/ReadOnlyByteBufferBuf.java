@@ -23,6 +23,7 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ReadOnlyBufferException;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 
@@ -73,6 +74,12 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public short getShortLE(int index) {
+        ensureAccessible();
+        return _getShortLE(index);
+    }
+
+    @Override
     protected short _getShortLE(int index) {
         return ByteBufUtil.swapShort(buffer.getShort(index));
     }
@@ -88,6 +95,12 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
         return (getByte(index) & 0xff)     << 16 |
                (getByte(index + 1) & 0xff) << 8  |
                getByte(index + 2) & 0xff;
+    }
+
+    @Override
+    public int getUnsignedMediumLE(int index) {
+        ensureAccessible();
+        return _getUnsignedMediumLE(index);
     }
 
     @Override
@@ -109,6 +122,12 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public int getIntLE(int index) {
+        ensureAccessible();
+        return _getIntLE(index);
+    }
+
+    @Override
     protected int _getIntLE(int index) {
         return ByteBufUtil.swapInt(buffer.getInt(index));
     }
@@ -122,6 +141,12 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     @Override
     protected long _getLong(int index) {
         return buffer.getLong(index);
+    }
+
+    @Override
+    public long getLongLE(int index) {
+        ensureAccessible();
+        return _getLongLE(index);
     }
 
     @Override
@@ -176,7 +201,17 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public ByteBuf setByte(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setByte(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf setShort(int index, int value) {
         throw new ReadOnlyBufferException();
     }
 
@@ -186,7 +221,17 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public ByteBuf setShortLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setShortLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf setMedium(int index, int value) {
         throw new ReadOnlyBufferException();
     }
 
@@ -196,7 +241,17 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public ByteBuf setMediumLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setMediumLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf setInt(int index, int value) {
         throw new ReadOnlyBufferException();
     }
 
@@ -206,12 +261,27 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public ByteBuf setIntLE(int index, int value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setIntLE(int index, int value) {
         throw new ReadOnlyBufferException();
     }
 
     @Override
+    public ByteBuf setLong(int index, long value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
     protected void _setLong(int index, long value) {
+        throw new ReadOnlyBufferException();
+    }
+
+    @Override
+    public ByteBuf setLongLE(int index, long value) {
         throw new ReadOnlyBufferException();
     }
 
@@ -243,6 +313,11 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     @Override
     public ByteBuf unwrap() {
         return null;
+    }
+
+    @Override
+    public boolean isReadOnly() {
+        return buffer.isReadOnly();
     }
 
     @Override
@@ -282,6 +357,18 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public int getBytes(int index, FileChannel out, long position, int length) throws IOException {
+        ensureAccessible();
+        if (length == 0) {
+            return 0;
+        }
+
+        ByteBuffer tmpBuf = internalNioBuffer();
+        tmpBuf.clear().position(index).limit(index + length);
+        return out.write(tmpBuf, position);
+    }
+
+    @Override
     public ByteBuf setBytes(int index, ByteBuf src, int srcIndex, int length) {
         throw new ReadOnlyBufferException();
     }
@@ -306,6 +393,11 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
         throw new ReadOnlyBufferException();
     }
 
+    @Override
+    public int setBytes(int index, FileChannel in, long position, int length) throws IOException {
+        throw new ReadOnlyBufferException();
+    }
+
     protected final ByteBuffer internalNioBuffer() {
         ByteBuffer tmpNioBuf = this.tmpNioBuf;
         if (tmpNioBuf == null) {
@@ -324,11 +416,9 @@ class ReadOnlyByteBufferBuf extends AbstractReferenceCountedByteBuf {
             throw new IndexOutOfBoundsException("Too many bytes to read - Need " + (index + length));
         }
 
-        ByteBuffer dst = ByteBuffer.allocateDirect(length);
-        dst.put(src);
-        dst.order(order());
-        dst.clear();
-        return new UnpooledDirectByteBuf(alloc(), dst, maxCapacity());
+        ByteBuf dst = src.isDirect() ? alloc().directBuffer(length) : alloc().heapBuffer(length);
+        dst.writeBytes(src);
+        return dst;
     }
 
     @Override

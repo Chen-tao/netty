@@ -17,6 +17,7 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.handler.codec.http2.Http2Headers.PseudoHeaderName;
+import io.netty.util.internal.StringUtil;
 import org.junit.Test;
 
 import java.util.Map.Entry;
@@ -29,6 +30,16 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class DefaultHttp2HeadersTest {
+
+    @Test(expected = Http2Exception.class)
+    public void nullHeaderNameNotAllowed() {
+        new DefaultHttp2Headers().add(null, "foo");
+    }
+
+    @Test(expected = Http2Exception.class)
+    public void emptyHeaderNameNotAllowed() {
+        new DefaultHttp2Headers().add(StringUtil.EMPTY_STRING, "foo");
+    }
 
     @Test
     public void testPseudoHeadersMustComeFirstWhenIterating() {
@@ -94,7 +105,7 @@ public class DefaultHttp2HeadersTest {
     }
 
     @Test
-    public void testSetHeadersOrdersPsuedoHeadersCorrectly() {
+    public void testSetHeadersOrdersPseudoHeadersCorrectly() {
         Http2Headers headers = newHeaders();
         Http2Headers other = new DefaultHttp2Headers().add("name2", "value2").authority("foo");
 
@@ -106,7 +117,7 @@ public class DefaultHttp2HeadersTest {
     }
 
     @Test
-    public void testSetAllOrdersPsuedoHeadersCorrectly() {
+    public void testSetAllOrdersPseudoHeadersCorrectly() {
         Http2Headers headers = newHeaders();
         Http2Headers other = new DefaultHttp2Headers().add("name2", "value2").authority("foo");
 
@@ -142,7 +153,7 @@ public class DefaultHttp2HeadersTest {
         }
     }
 
-    private static void verifyPseudoHeadersFirst(Http2Headers headers) {
+    static void verifyPseudoHeadersFirst(Http2Headers headers) {
         CharSequence lastNonPseudoName = null;
         for (Entry<CharSequence, CharSequence> entry: headers) {
             if (entry.getKey().length() == 0 || entry.getKey().charAt(0) != ':') {

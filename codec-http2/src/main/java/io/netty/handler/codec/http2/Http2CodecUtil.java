@@ -25,28 +25,38 @@ import io.netty.channel.DefaultChannelPromise;
 import io.netty.handler.ssl.ApplicationProtocolNames;
 import io.netty.util.AsciiString;
 import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.internal.UnstableApi;
 
 import static io.netty.buffer.Unpooled.directBuffer;
-import static io.netty.buffer.Unpooled.unmodifiableBuffer;
 import static io.netty.buffer.Unpooled.unreleasableBuffer;
+import static io.netty.handler.codec.http2.Http2Error.PROTOCOL_ERROR;
+import static io.netty.handler.codec.http2.Http2Exception.connectionError;
+import static io.netty.handler.codec.http2.Http2Exception.headerListSizeError;
 import static io.netty.util.CharsetUtil.UTF_8;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
  * Constants and utility method used for encoding/decoding HTTP2 frames.
  */
+@UnstableApi
 public final class Http2CodecUtil {
     public static final int CONNECTION_STREAM_ID = 0;
     public static final int HTTP_UPGRADE_STREAM_ID = 1;
-    public static final CharSequence HTTP_UPGRADE_SETTINGS_HEADER = new AsciiString("HTTP2-Settings");
+    public static final CharSequence HTTP_UPGRADE_SETTINGS_HEADER = AsciiString.cached("HTTP2-Settings");
     public static final CharSequence HTTP_UPGRADE_PROTOCOL_NAME = "h2c";
     public static final CharSequence TLS_UPGRADE_PROTOCOL_NAME = ApplicationProtocolNames.HTTP_2;
 
     public static final int PING_FRAME_PAYLOAD_LENGTH = 8;
-    public static final short MAX_UNSIGNED_BYTE = 0xFF;
-    public static final int MAX_UNSIGNED_SHORT = 0xFFFF;
-    public static final long MAX_UNSIGNED_INT = 0xFFFFFFFFL;
+    public static final short MAX_UNSIGNED_BYTE = 0xff;
+    /**
+     * The maximum number of padding bytes. That is the 255 padding bytes appended to the end of a frame and the 1 byte
+     * pad length field.
+     */
+    public static final int MAX_PADDING = 256;
+    public static final long MAX_UNSIGNED_INT = 0xffffffffL;
     public static final int FRAME_HEADER_LENGTH = 9;
     public static final int SETTING_ENTRY_LENGTH = 6;
     public static final int PRIORITY_ENTRY_LENGTH = 5;
@@ -54,10 +64,12 @@ public final class Http2CodecUtil {
     public static final short MAX_WEIGHT = 256;
     public static final short MIN_WEIGHT = 1;
 
-    private static final ByteBuf CONNECTION_PREFACE = unmodifiableBuffer(
-            unreleasableBuffer(directBuffer(24).writeBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(UTF_8))));
-    private static final ByteBuf EMPTY_PING = unmodifiableBuffer(
-            unreleasableBuffer(directBuffer(PING_FRAME_PAYLOAD_LENGTH).writeZero(PING_FRAME_PAYLOAD_LENGTH)));
+    private static final ByteBuf CONNECTION_PREFACE =
+            unreleasableBuffer(directBuffer(24).writeBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(UTF_8)))
+                    .asReadOnly();
+    private static final ByteBuf EMPTY_PING =
+            unreleasableBuffer(directBuffer(PING_FRAME_PAYLOAD_LENGTH).writeZero(PING_FRAME_PAYLOAD_LENGTH))
+                    .asReadOnly();
 
     private static final int MAX_PADDING_LENGTH_LENGTH = 1;
     public static final int DATA_FRAME_HEADER_LENGTH = FRAME_HEADER_LENGTH + MAX_PADDING_LENGTH_LENGTH;
@@ -79,12 +91,12 @@ public final class Http2CodecUtil {
     public static final char SETTINGS_MAX_HEADER_LIST_SIZE = 6;
     public static final int NUM_STANDARD_SETTINGS = 6;
 
-    public static final int MAX_HEADER_TABLE_SIZE = Integer.MAX_VALUE; // Size limited by HPACK library
+    public static final long MAX_HEADER_TABLE_SIZE = MAX_UNSIGNED_INT;
     public static final long MAX_CONCURRENT_STREAMS = MAX_UNSIGNED_INT;
     public static final int MAX_INITIAL_WINDOW_SIZE = Integer.MAX_VALUE;
     public static final int MAX_FRAME_SIZE_LOWER_BOUND = 0x4000;
-    public static final int MAX_FRAME_SIZE_UPPER_BOUND = 0xFFFFFF;
-    public static final long MAX_HEADER_LIST_SIZE = Long.MAX_VALUE;
+    public static final int MAX_FRAME_SIZE_UPPER_BOUND = 0xffffff;
+    public static final long MAX_HEADER_LIST_SIZE = MAX_UNSIGNED_INT;
 
     public static final long MIN_HEADER_TABLE_SIZE = 0;
     public static final long MIN_CONCURRENT_STREAMS = 0;
@@ -92,17 +104,55 @@ public final class Http2CodecUtil {
     public static final long MIN_HEADER_LIST_SIZE = 0;
 
     public static final int DEFAULT_WINDOW_SIZE = 65535;
-    public static final boolean DEFAULT_ENABLE_PUSH = true;
     public static final short DEFAULT_PRIORITY_WEIGHT = 16;
     public static final int DEFAULT_HEADER_TABLE_SIZE = 4096;
-    public static final int DEFAULT_MAX_HEADER_SIZE = 8192;
+    /**
+     * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">The initial value of this setting is unlimited</a>.
+     * However in practice we don't want to allow our peers to use unlimited memory by default. So we take advantage
+     * of the <q>For any given request, a lower limit than what is advertised MAY be enforced.</q> loophole.
+     */
+    public static final long DEFAULT_HEADER_LIST_SIZE = 8192;
     public static final int DEFAULT_MAX_FRAME_SIZE = MAX_FRAME_SIZE_LOWER_BOUND;
-
     /**
      * The assumed minimum value for {@code SETTINGS_MAX_CONCURRENT_STREAMS} as
-     * recommended by the HTTP/2 spec.
+     * recommended by the <a herf="https://tools.ietf.org/html/rfc7540#section-6.5.2">HTTP/2 spec</a>.
      */
     public static final int SMALLEST_MAX_CONCURRENT_STREAMS = 100;
+    static final int DEFAULT_MAX_RESERVED_STREAMS = SMALLEST_MAX_CONCURRENT_STREAMS;
+    static final int DEFAULT_MIN_ALLOCATION_CHUNK = 1024;
+    static final int DEFAULT_INITIAL_HUFFMAN_DECODE_CAPACITY = 32;
+
+    /**
+     * Calculate the threshold in bytes which should trigger a {@code GO_AWAY} if a set of headers exceeds this amount.
+     * @param maxHeaderListSize
+     *      <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a> for the local
+     *      endpoint.
+     * @return the threshold in bytes which should trigger a {@code GO_AWAY} if a set of headers exceeds this amount.
+     */
+    public static long calculateMaxHeaderListSizeGoAway(long maxHeaderListSize) {
+        // This is equivalent to `maxHeaderListSize * 1.25` but we avoid floating point multiplication.
+        return maxHeaderListSize + (maxHeaderListSize >>> 2);
+    }
+
+    public static final long DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_MILLIS = MILLISECONDS.convert(30, SECONDS);
+
+    /**
+     * Returns {@code true} if the stream is an outbound stream.
+     *
+     * @param server    {@code true} if the endpoint is a server, {@code false} otherwise.
+     * @param streamId  the stream identifier
+     */
+    public static boolean isOutboundStream(boolean server, int streamId) {
+        boolean even = (streamId & 1) == 0;
+        return streamId > 0 && server == even;
+    }
+
+    /**
+     * Returns true if the {@code streamId} is a valid HTTP/2 stream identifier.
+     */
+    public static boolean isStreamIdValid(int streamId) {
+        return streamId >= 0;
+    }
 
     /**
      * Indicates whether or not the given value for max frame size falls within the valid range.
@@ -116,7 +166,7 @@ public final class Http2CodecUtil {
      */
     public static ByteBuf connectionPrefaceBuf() {
         // Return a duplicate so that modifications to the reader index will not affect the original buffer.
-        return CONNECTION_PREFACE.duplicate().retain();
+        return CONNECTION_PREFACE.retainedDuplicate();
     }
 
     /**
@@ -124,11 +174,11 @@ public final class Http2CodecUtil {
      */
     public static ByteBuf emptyPingBuf() {
         // Return a duplicate so that modifications to the reader index will not affect the original buffer.
-        return EMPTY_PING.duplicate().retain();
+        return EMPTY_PING.retainedDuplicate();
     }
 
     /**
-     * Iteratively looks through the causaility chain for the given exception and returns the first
+     * Iteratively looks through the causality chain for the given exception and returns the first
      * {@link Http2Exception} or {@code null} if none.
      */
     public static Http2Exception getEmbeddedHttp2Exception(Throwable cause) {
@@ -150,36 +200,14 @@ public final class Http2CodecUtil {
             return Unpooled.EMPTY_BUFFER;
         }
 
-        // Create the debug message. `* 3` because UTF-8 max character consumes 3 bytes.
-        ByteBuf debugData = ctx.alloc().buffer(cause.getMessage().length() * 3);
-        ByteBufUtil.writeUtf8(debugData, cause.getMessage());
-        return debugData;
+        return ByteBufUtil.writeUtf8(ctx.alloc(), cause.getMessage());
     }
 
     /**
      * Reads a big-endian (31-bit) integer from the buffer.
      */
     public static int readUnsignedInt(ByteBuf buf) {
-        return (buf.readByte() & 0x7F) << 24 | (buf.readByte() & 0xFF) << 16
-                | (buf.readByte() & 0xFF) << 8 | buf.readByte() & 0xFF;
-    }
-
-    /**
-     * Writes a big-endian (32-bit) unsigned integer to the buffer.
-     */
-    public static void writeUnsignedInt(long value, ByteBuf out) {
-        out.writeByte((int) (value >> 24 & 0xFF));
-        out.writeByte((int) (value >> 16 & 0xFF));
-        out.writeByte((int) (value >> 8 & 0xFF));
-        out.writeByte((int) (value & 0xFF));
-    }
-
-    /**
-     * Writes a big-endian (16-bit) unsigned integer to the buffer.
-     */
-    public static void writeUnsignedShort(int value, ByteBuf out) {
-        out.writeByte(value >> 8 & 0xFF);
-        out.writeByte(value & 0xFF);
+        return buf.readInt() & 0x7fffffff;
     }
 
     /**
@@ -198,6 +226,32 @@ public final class Http2CodecUtil {
         return max(0, min(state.pendingBytes(), state.windowSize()));
     }
 
+    /**
+     * Results in a RST_STREAM being sent for {@code streamId} due to violating
+     * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>.
+     * @param streamId The stream ID that was being processed when the exceptional condition occurred.
+     * @param maxHeaderListSize The max allowed size for a list of headers in bytes which was exceeded.
+     * @param onDecode {@code true} if the exception was encountered during decoder. {@code false} for encode.
+     * @throws Http2Exception a stream error.
+     */
+    public static void headerListSizeExceeded(int streamId, long maxHeaderListSize,
+                                              boolean onDecode) throws Http2Exception {
+        throw headerListSizeError(streamId, PROTOCOL_ERROR, onDecode, "Header size exceeded max " +
+                                  "allowed size (%d)", maxHeaderListSize);
+    }
+
+    /**
+     * Results in a GO_AWAY being sent due to violating
+     * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a> in an unrecoverable
+     * manner.
+     * @param maxHeaderListSize The max allowed size for a list of headers in bytes which was exceeded.
+     * @throws Http2Exception a connection error.
+     */
+    public static void headerListSizeExceeded(long maxHeaderListSize) throws Http2Exception {
+        throw connectionError(PROTOCOL_ERROR, "Header size exceeded max " +
+                "allowed size (%d)", maxHeaderListSize);
+    }
+
     static void writeFrameHeaderInternal(ByteBuf out, int payloadLength, byte type,
             Http2Flags flags, int streamId) {
         out.writeMedium(payloadLength);
@@ -210,16 +264,16 @@ public final class Http2CodecUtil {
      * Provides the ability to associate the outcome of multiple {@link ChannelPromise}
      * objects into a single {@link ChannelPromise} object.
      */
-    static class SimpleChannelPromiseAggregator extends DefaultChannelPromise {
+    static final class SimpleChannelPromiseAggregator extends DefaultChannelPromise {
         private final ChannelPromise promise;
         private int expectedCount;
-        private int successfulCount;
-        private int failureCount;
+        private int doneCount;
+        private Throwable lastFailure;
         private boolean doneAllocating;
 
         SimpleChannelPromiseAggregator(ChannelPromise promise, Channel c, EventExecutor e) {
             super(c, e);
-            assert promise != null;
+            assert promise != null && !promise.isDone();
             this.promise = promise;
         }
 
@@ -229,9 +283,7 @@ public final class Http2CodecUtil {
          * {@code null} if {@link #doneAllocatingPromises()} was previously called.
          */
         public ChannelPromise newPromise() {
-            if (doneAllocating) {
-                throw new IllegalStateException("Done allocating. No more promises can be allocated.");
-            }
+            assert !doneAllocating : "Done allocating. No more promises can be allocated.";
             ++expectedCount;
             return this;
         }
@@ -244,9 +296,8 @@ public final class Http2CodecUtil {
         public ChannelPromise doneAllocatingPromises() {
             if (!doneAllocating) {
                 doneAllocating = true;
-                if (successfulCount == expectedCount) {
-                    promise.setSuccess();
-                    return super.setSuccess(null);
+                if (doneCount == expectedCount || expectedCount == 0) {
+                    return setPromise();
                 }
             }
             return this;
@@ -255,10 +306,10 @@ public final class Http2CodecUtil {
         @Override
         public boolean tryFailure(Throwable cause) {
             if (allowFailure()) {
-                ++failureCount;
-                if (failureCount == 1) {
-                    promise.tryFailure(cause);
-                    return super.tryFailure(cause);
+                ++doneCount;
+                lastFailure = cause;
+                if (allPromisesDone()) {
+                    return tryPromise();
                 }
                 // TODO: We break the interface a bit here.
                 // Multiple failure events can be processed without issue because this is an aggregation.
@@ -276,30 +327,21 @@ public final class Http2CodecUtil {
         @Override
         public ChannelPromise setFailure(Throwable cause) {
             if (allowFailure()) {
-                ++failureCount;
-                if (failureCount == 1) {
-                    promise.setFailure(cause);
-                    return super.setFailure(cause);
+                ++doneCount;
+                lastFailure = cause;
+                if (allPromisesDone()) {
+                    return setPromise();
                 }
             }
             return this;
         }
 
-        private boolean allowFailure() {
-            return awaitingPromises() || expectedCount == 0;
-        }
-
-        private boolean awaitingPromises() {
-            return successfulCount + failureCount < expectedCount;
-        }
-
         @Override
         public ChannelPromise setSuccess(Void result) {
             if (awaitingPromises()) {
-                ++successfulCount;
-                if (successfulCount == expectedCount && doneAllocating) {
-                    promise.setSuccess(result);
-                    return super.setSuccess(result);
+                ++doneCount;
+                if (allPromisesDone()) {
+                    setPromise();
                 }
             }
             return this;
@@ -308,10 +350,9 @@ public final class Http2CodecUtil {
         @Override
         public boolean trySuccess(Void result) {
             if (awaitingPromises()) {
-                ++successfulCount;
-                if (successfulCount == expectedCount && doneAllocating) {
-                    promise.trySuccess(result);
-                    return super.trySuccess(result);
+                ++doneCount;
+                if (allPromisesDone()) {
+                    return tryPromise();
                 }
                 // TODO: We break the interface a bit here.
                 // Multiple success events can be processed without issue because this is an aggregation.
@@ -319,7 +360,45 @@ public final class Http2CodecUtil {
             }
             return false;
         }
+
+        private boolean allowFailure() {
+            return awaitingPromises() || expectedCount == 0;
+        }
+
+        private boolean awaitingPromises() {
+            return doneCount < expectedCount;
+        }
+
+        private boolean allPromisesDone() {
+            return doneCount == expectedCount && doneAllocating;
+        }
+
+        private ChannelPromise setPromise() {
+            if (lastFailure == null) {
+                promise.setSuccess();
+                return super.setSuccess(null);
+            } else {
+                promise.setFailure(lastFailure);
+                return super.setFailure(lastFailure);
+            }
+        }
+
+        private boolean tryPromise() {
+            if (lastFailure == null) {
+                promise.trySuccess();
+                return super.trySuccess(null);
+            } else {
+                promise.tryFailure(lastFailure);
+                return super.tryFailure(lastFailure);
+            }
+        }
     }
 
+    public static void verifyPadding(int padding) {
+        if (padding < 0 || padding > MAX_PADDING) {
+            throw new IllegalArgumentException(String.format("Invalid padding '%d'. Padding must be between 0 and " +
+                                                             "%d (inclusive).", padding, MAX_PADDING));
+        }
+    }
     private Http2CodecUtil() { }
 }

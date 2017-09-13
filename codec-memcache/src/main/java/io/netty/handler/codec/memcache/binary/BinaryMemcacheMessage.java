@@ -17,6 +17,7 @@ package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.memcache.MemcacheMessage;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * An interface that defines a binary Memcache message, providing common properties for
@@ -28,6 +29,7 @@ import io.netty.handler.codec.memcache.MemcacheMessage;
  * @see BinaryMemcacheRequest
  * @see BinaryMemcacheResponse
  */
+@UnstableApi
 public interface BinaryMemcacheMessage extends MemcacheMessage {
 
     /**
@@ -69,15 +71,6 @@ public interface BinaryMemcacheMessage extends MemcacheMessage {
     short keyLength();
 
     /**
-     * Set the key length of the message.
-     * <p/>
-     * This may be 0, since the key is optional.
-     *
-     * @param keyLength the key length to use.
-     */
-    BinaryMemcacheMessage setKeyLength(short keyLength);
-
-    /**
      * Return the extras length of the message.
      * <p/>
      * This may be 0, since the extras content is optional.
@@ -85,15 +78,6 @@ public interface BinaryMemcacheMessage extends MemcacheMessage {
      * @return the extras length.
      */
     byte extrasLength();
-
-    /**
-     * Set the extras length of the message.
-     * <p/>
-     * This may be 0, since the extras content is optional.
-     *
-     * @param extrasLength the extras length.
-     */
-    BinaryMemcacheMessage setExtrasLength(byte extrasLength);
 
     /**
      * Returns the data type of the message.
@@ -160,14 +144,16 @@ public interface BinaryMemcacheMessage extends MemcacheMessage {
      *
      * @return the key of the document.
      */
-    String key();
+    ByteBuf key();
 
     /**
-     * Sets the key of the document.
+     * Sets the key of the document. {@link ByteBuf#release()} ownership of {@code key}
+     * is transferred to this {@link BinaryMemcacheMessage}.
      *
-     * @param key the key of the message.
+     * @param key the key of the message. {@link ByteBuf#release()} ownership is transferred
+     *            to this {@link BinaryMemcacheMessage}.
      */
-    BinaryMemcacheMessage setKey(String key);
+    BinaryMemcacheMessage setKey(ByteBuf key);
 
     /**
      * Returns a {@link ByteBuf} representation of the optional extras.
@@ -177,9 +163,11 @@ public interface BinaryMemcacheMessage extends MemcacheMessage {
     ByteBuf extras();
 
     /**
-     * Sets the extras buffer on the message.
+     * Sets the extras buffer on the message. {@link ByteBuf#release()} ownership of {@code extras}
+     * is transferred to this {@link BinaryMemcacheMessage}.
      *
-     * @param extras the extras buffer of the document.
+     * @param extras the extras buffer of the document. {@link ByteBuf#release()} ownership is transferred
+     *               to this {@link BinaryMemcacheMessage}.
      */
     BinaryMemcacheMessage setExtras(ByteBuf extras);
 

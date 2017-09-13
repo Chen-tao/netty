@@ -22,10 +22,8 @@ import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
-import io.netty.channel.RecvByteBufAllocator;
 import io.netty.channel.ServerChannel;
-import io.netty.channel.unix.FileDescriptor;
-import io.netty.channel.unix.Socket;
+import io.netty.util.internal.UnstableApi;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -33,30 +31,15 @@ import java.net.SocketAddress;
 public abstract class AbstractEpollServerChannel extends AbstractEpollChannel implements ServerChannel {
     private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
 
-    /**
-     * @deprecated Use {@link #AbstractEpollServerChannel(Socket, boolean)}.
-     */
     protected AbstractEpollServerChannel(int fd) {
-        this(new Socket(fd), false);
+        this(new LinuxSocket(fd), false);
     }
 
-    /**
-     * @deprecated Use {@link #AbstractEpollServerChannel(Socket, boolean)}.
-     */
-    @Deprecated
-    protected AbstractEpollServerChannel(FileDescriptor fd) {
-        this(new Socket(fd.intValue()));
+    AbstractEpollServerChannel(LinuxSocket fd) {
+        this(fd, isSoErrorZero(fd));
     }
 
-    /**
-     * @deprecated Use {@link #AbstractEpollServerChannel(Socket, boolean)}.
-     */
-    @Deprecated
-    protected AbstractEpollServerChannel(Socket fd) {
-        this(fd, fd.getSoError() == 0);
-    }
-
-    protected AbstractEpollServerChannel(Socket fd, boolean active) {
+    AbstractEpollServerChannel(LinuxSocket fd, boolean active) {
         super(null, fd, Native.EPOLLIN, active);
     }
 
@@ -90,6 +73,16 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
         throw new UnsupportedOperationException();
     }
 
+    @UnstableApi
+    @Override
+    protected final void doShutdownOutput(Throwable cause) throws Exception {
+        try {
+            super.doShutdownOutput(cause);
+        } finally {
+            close();
+        }
+    }
+
     abstract Channel newChildChannel(int fd, byte[] remote, int offset, int len) throws Exception;
 
     final class EpollServerSocketUnsafe extends AbstractEpollUnsafe {
@@ -105,43 +98,38 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
         }
 
         @Override
-        protected EpollRecvByteAllocatorHandle newEpollHandle(RecvByteBufAllocator.Handle handle) {
-            return new EpollRecvByteAllocatorMessageHandle(handle, isFlagSet(Native.EPOLLET));
-        }
-
-        @Override
         void epollInReady() {
             assert eventLoop().inEventLoop();
-            if (fd().isInputShutdown()) {
-                return;
-            }
-            boolean edgeTriggered = isFlagSet(Native.EPOLLET);
-
             final ChannelConfig config = config();
-            if (!readPending && !edgeTriggered && !config.isAutoRead()) {
-                // ChannelConfig.setAutoRead(false) was called in the meantime
+            if (shouldBreakEpollInReady(config)) {
                 clearEpollIn0();
                 return;
             }
+            final EpollRecvByteAllocatorHandle allocHandle = recvBufAllocHandle();
+            allocHandle.edgeTriggered(isFlagSet(Native.EPOLLET));
 
             final ChannelPipeline pipeline = pipeline();
-            final EpollRecvByteAllocatorHandle allocHandle = recvBufAllocHandle();
             allocHandle.reset(config);
+            allocHandle.attemptedBytesRead(1);
+            epollInBefore();
 
             Throwable exception = null;
             try {
                 try {
                     do {
-                        int socketFd = fd().accept(acceptedAddress);
-                        if (socketFd == -1) {
+                        // lastBytesRead represents the fd. We use lastBytesRead because it must be set so that the
+                        // EpollRecvByteAllocatorHandle knows if it should try to read again or not when autoRead is
+                        // enabled.
+                        allocHandle.lastBytesRead(socket.accept(acceptedAddress));
+                        if (allocHandle.lastBytesRead() == -1) {
                             // this means everything was handled for now
                             break;
                         }
-                        readPending = false;
                         allocHandle.incMessagesRead(1);
 
-                        int len = acceptedAddress[0];
-                        pipeline.fireChannelRead(newChildChannel(socketFd, acceptedAddress, 1, len));
+                        readPending = false;
+                        pipeline.fireChannelRead(newChildChannel(allocHandle.lastBytesRead(), acceptedAddress, 1,
+                                                                 acceptedAddress[0]));
                     } while (allocHandle.continueReading());
                 } catch (Throwable t) {
                     exception = t;
@@ -151,19 +139,15 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
 
                 if (exception != null) {
                     pipeline.fireExceptionCaught(exception);
-                    checkResetEpollIn(edgeTriggered);
                 }
             } finally {
-                // Check if there is a readPending which was not processed yet.
-                // This could be for two reasons:
-                // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
-                // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
-                //
-                // See https://github.com/netty/netty/issues/2254
-                if (!readPending && !config.isAutoRead()) {
-                    clearEpollIn0();
-                }
+                epollInFinally(config);
             }
         }
+    }
+
+    @Override
+    protected boolean doConnect(SocketAddress remoteAddress, SocketAddress localAddress) throws Exception {
+        throw new UnsupportedOperationException();
     }
 }

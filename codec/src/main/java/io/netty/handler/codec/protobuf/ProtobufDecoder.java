@@ -32,7 +32,7 @@ import java.util.List;
 
 /**
  * Decodes a received {@link ByteBuf} into a
- * <a href="http://code.google.com/p/protobuf/">Google Protocol Buffers</a>
+ * <a href="https://github.com/google/protobuf">Google Protocol Buffers</a>
  * {@link Message} and {@link MessageLite}. Please note that this decoder must
  * be used with a proper {@link ByteToMessageDecoder} such as {@link ProtobufVarint32FrameDecoder}
  * or {@link LengthFieldBasedFrameDecoder} if you are using a stream-based
@@ -69,7 +69,7 @@ public class ProtobufDecoder extends MessageToMessageDecoder<ByteBuf> {
     static {
         boolean hasParser = false;
         try {
-            // MessageLite.getParsetForType() is not available until protobuf 2.5.0.
+            // MessageLite.getParserForType() is not available until protobuf 2.5.0.
             MessageLite.class.getDeclaredMethod("getParserForType");
             hasParser = true;
         } catch (Throwable t) {

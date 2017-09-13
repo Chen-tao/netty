@@ -17,12 +17,14 @@ package io.netty.handler.codec.dns;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.UnstableApi;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
  * The default {@code DnsRawRecord} implementation.
  */
+@UnstableApi
 public class DefaultDnsRawRecord extends AbstractDnsRecord implements DnsRawRecord {
 
     private final ByteBuf content;
@@ -67,12 +69,22 @@ public class DefaultDnsRawRecord extends AbstractDnsRecord implements DnsRawReco
 
     @Override
     public DnsRawRecord copy() {
-        return new DefaultDnsRawRecord(name(), type(), dnsClass(), timeToLive(), content().copy());
+        return replace(content().copy());
     }
 
     @Override
     public DnsRawRecord duplicate() {
-        return new DefaultDnsRawRecord(name(), type(), dnsClass(), timeToLive(), content().duplicate());
+        return replace(content().duplicate());
+    }
+
+    @Override
+    public DnsRawRecord retainedDuplicate() {
+        return replace(content().retainedDuplicate());
+    }
+
+    @Override
+    public DnsRawRecord replace(ByteBuf content) {
+        return new DefaultDnsRawRecord(name(), type(), dnsClass(), timeToLive(), content);
     }
 
     @Override

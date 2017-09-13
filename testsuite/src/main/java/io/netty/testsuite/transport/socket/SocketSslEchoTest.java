@@ -45,7 +45,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
-import javax.net.ssl.SSLEngine;
 import java.io.File;
 import java.io.IOException;
 import java.security.cert.CertificateException;
@@ -57,6 +56,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.net.ssl.SSLEngine;
 
 import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.is;
@@ -148,11 +148,19 @@ public class SocketSslEchoTest extends AbstractSocketTest {
                         continue;
                     }
 
-                    Renegotiation r;
-                    if (rt == RenegotiationType.NONE) {
-                        r = Renegotiation.NONE;
-                    } else {
-                        r = new Renegotiation(rt, "SSL_RSA_WITH_3DES_EDE_CBC_SHA");
+                    final Renegotiation r;
+                    switch (rt) {
+                        case NONE:
+                            r = Renegotiation.NONE;
+                            break;
+                        case SERVER_INITIATED:
+                            r = new Renegotiation(rt, sc.cipherSuites().get(sc.cipherSuites().size() - 1));
+                            break;
+                        case CLIENT_INITIATED:
+                            r = new Renegotiation(rt, cc.cipherSuites().get(cc.cipherSuites().size() - 1));
+                            break;
+                        default:
+                            throw new Error();
                     }
 
                     for (int i = 0; i < 32; i++) {
@@ -272,7 +280,7 @@ public class SocketSslEchoTest extends AbstractSocketTest {
         });
 
         final Channel sc = sb.bind().sync().channel();
-        cb.connect().sync();
+        cb.connect(sc.localAddress()).sync();
 
         final Future<Channel> clientHandshakeFuture = clientSslHandler.handshakeFuture();
 
@@ -287,7 +295,7 @@ public class SocketSslEchoTest extends AbstractSocketTest {
             int length = Math.min(random.nextInt(1024 * 64), data.length - clientSendCounterVal);
             ByteBuf buf = Unpooled.wrappedBuffer(data, clientSendCounterVal, length);
             if (useCompositeByteBuf) {
-                buf = Unpooled.compositeBuffer().addComponent(buf).writerIndex(buf.writerIndex());
+                buf = Unpooled.compositeBuffer().addComponent(true, buf);
             }
 
             ChannelFuture future = clientChannel.writeAndFlush(buf);
@@ -520,7 +528,7 @@ public class SocketSslEchoTest extends AbstractSocketTest {
 
             ByteBuf buf = Unpooled.wrappedBuffer(actual);
             if (useCompositeByteBuf) {
-                buf = Unpooled.compositeBuffer().addComponent(buf).writerIndex(buf.writerIndex());
+                buf = Unpooled.compositeBuffer().addComponent(true, buf);
             }
             ctx.write(buf);
 

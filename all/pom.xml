@@ -20,7 +20,7 @@
   <parent>
     <groupId>io.netty</groupId>
     <artifactId>netty-parent</artifactId>
-    <version>4.1.0.CR2-SNAPSHOT</version>
+    <version>4.1.16.Final-SNAPSHOT</version>
   </parent>
 
   <artifactId>netty-all</artifactId>
@@ -29,17 +29,239 @@
   <name>Netty/All-in-One</name>
 
   <properties>
-    <quickbuild>true</quickbuild>
     <generatedSourceDir>${project.build.directory}/src</generatedSourceDir>
     <dependencyVersionsDir>${project.build.directory}/versions</dependencyVersionsDir>
   </properties>
 
   <profiles>
+    <!-- If the uber profile is used it will automatically fetch the missing native jar from maven and add it to the all jar as well. -->
+    <profile>
+      <id>uber-staging</id>
+      <repositories>
+        <repository>
+          <id>staged-releases</id>
+          <name>Staged Releases</name>
+          <url>https://oss.sonatype.org/service/local/repositories/${stagingRepositoryId}/content/</url>
+        </repository>
+      </repositories>
+
+      <dependencies>
+        <!-- Depend on all our native jars -->
+        <!-- As this is executed on either macOS or Linux we directly need to specify the classifier -->
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-epoll</artifactId>
+          <version>${project.version}</version>
+          <classifier>linux-x86_64</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-kqueue</artifactId>
+          <version>${project.version}</version>
+          <classifier>osx-x86_64</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>uber-snapshot</id>
+
+      <dependencies>
+        <!-- Depend on all our native jars -->
+        <!-- As this is executed on either macOS or Linux we directly need to specify the classifier -->
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-epoll</artifactId>
+          <version>${project.version}</version>
+          <classifier>linux-x86_64</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-kqueue</artifactId>
+          <version>${project.version}</version>
+          <classifier>osx-x86_64</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+    
+    <!-- The linux profile will only include the native jar for epol to the all jar.
+         If you want to also include the native jar for kqueue use -Puber.
+    -->
+    <profile>
+      <id>linux</id>
+      <activation>
+        <os>
+          <family>linux</family>
+        </os>
+      </activation>
+      <dependencies>
+        <!-- All release modules -->
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-epoll</artifactId>
+          <version>${project.version}</version>
+          <classifier>${jni.classifier}</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+    <!-- The mac, openbsd and freebsd  profile will only include the native jar for epol to the all jar.
+         If you want to also include the native jar for kqueue use -Puber.
+    -->
+    <profile>
+      <id>mac</id>
+      <activation>
+        <os>
+          <family>mac</family>
+        </os>
+      </activation>
+      <dependencies>
+        <!-- All release modules -->
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-kqueue</artifactId>
+          <version>${project.version}</version>
+          <classifier>${jni.classifier}</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>freebsd</id>
+      <activation>
+        <os>
+          <family>unix</family>
+          <name>freebsd</name>
+        </os>
+      </activation>
+      <dependencies>
+        <!-- All release modules -->
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-kqueue</artifactId>
+          <version>${project.version}</version>
+          <classifier>${jni.classifier}</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>openbsd</id>
+      <activation>
+        <os>
+          <family>unix</family>
+          <name>openbsd</name>
+        </os>
+      </activation>
+      <dependencies>
+        <!-- All release modules -->
+        <dependency>
+          <groupId>${project.groupId}</groupId>
+          <artifactId>netty-transport-native-kqueue</artifactId>
+          <version>${project.version}</version>
+          <classifier>${jni.classifier}</classifier>
+          <scope>compile</scope>
+          <optional>true</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+
     <profile>
       <id>full</id>
-      <properties>
-        <quickbuild>false</quickbuild>
-      </properties>
+      <!-- Only include in full profile as this will not work on Java9 yet -->
+      <!-- https://issues.apache.org/jira/browse/JXR-133 -->
+      <build>
+        <plugins>
+          <!-- Generate Xref -->
+          <plugin>
+            <artifactId>maven-jxr-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>generate-xref</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jxr</goal>
+                </goals>
+              </execution>
+            </executions>
+            <configuration>
+              <linkJavadoc>true</linkJavadoc>
+              <destDir>${project.build.directory}/xref</destDir>
+              <javadocDir>${project.build.directory}/api</javadocDir>
+              <docTitle>Netty Source Xref (${project.version})</docTitle>
+              <windowTitle>Netty Source Xref (${project.version})</windowTitle>
+            </configuration>
+            <dependencies>
+              <dependency>
+                <groupId>${project.groupId}</groupId>
+                <artifactId>netty-build</artifactId>
+                <version>19</version>
+                <exclusions>
+                  <!-- Use version 7.3 until a new netty-build release is out -->
+                  <!-- See https://issues.apache.org/jira/browse/JXR-133 -->
+                  <exclusion>
+                    <groupId>com.puppycrawl.tools</groupId>
+                    <artifactId>checkstyle</artifactId>
+                  </exclusion>
+                </exclusions> 
+              </dependency>
+              <dependency>
+                <groupId>com.puppycrawl.tools</groupId>
+                <artifactId>checkstyle</artifactId>
+                <version>7.3</version>
+              </dependency>
+            </dependencies>
+          </plugin>
+
+          <!-- Generate Javadoc -->
+          <plugin>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+            <configuration>
+              <skip>${quickbuild}</skip>
+              <excludePackageNames>*.internal,*.example</excludePackageNames>
+              <docfilessubdirs>true</docfilessubdirs>
+              <outputDirectory>${project.build.directory}/api</outputDirectory>
+              <overview>${project.basedir}/src/javadoc/overview.html</overview>
+              <doctitle>Netty API Reference (${project.version})</doctitle>
+              <windowtitle>Netty API Reference (${project.version})</windowtitle>
+              <detectJavaApiLink>false</detectJavaApiLink>
+              <additionalparam>
+                -link http://docs.oracle.com/javase/7/docs/api/
+                -link http://code.google.com/apis/protocolbuffers/docs/reference/java/
+                -link http://docs.oracle.com/javaee/6/api/
+                -link http://www.slf4j.org/apidocs/
+                -link https://commons.apache.org/proper/commons-logging/apidocs/
+                -link http://logging.apache.org/log4j/1.2/apidocs/
+
+                -group "Low-level data representation" io.netty.buffer*
+                -group "Central interface for all I/O operations" io.netty.channel*
+                -group "Client &amp; Server bootstrapping utilities" io.netty.bootstrap*
+                -group "Reusable I/O event interceptors" io.netty.handler*
+                -group "Miscellaneous" io.netty.util*
+              </additionalparam>
+              <locale>en_US</locale>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
     </profile>
     <profile>
       <id>coverage</id>
@@ -80,25 +302,6 @@
           </plugin>
         </plugins>
       </build>
-    </profile>
-    <profile>
-      <id>linux</id>
-      <activation>
-        <os>
-          <family>linux</family>
-        </os>
-      </activation>
-      <dependencies>
-        <!-- All release modules -->
-        <dependency>
-          <groupId>${project.groupId}</groupId>
-          <artifactId>netty-transport-native-epoll</artifactId>
-          <version>${project.version}</version>
-          <classifier>${epoll.classifier}</classifier>
-          <scope>compile</scope>
-          <optional>true</optional>
-        </dependency>
-      </dependencies>
     </profile>
   </profiles>
 
@@ -163,6 +366,20 @@
     </dependency>
     <dependency>
       <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-redis</artifactId>
+      <version>${project.version}</version>
+      <scope>compile</scope>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-smtp</artifactId>
+      <version>${project.version}</version>
+      <scope>compile</scope>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
       <artifactId>netty-codec-socks</artifactId>
       <version>${project.version}</version>
       <scope>compile</scope>
@@ -171,6 +388,13 @@
     <dependency>
       <groupId>${project.groupId}</groupId>
       <artifactId>netty-codec-stomp</artifactId>
+      <version>${project.version}</version>
+      <scope>compile</scope>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-xml</artifactId>
       <version>${project.version}</version>
       <scope>compile</scope>
       <optional>true</optional>
@@ -313,6 +537,7 @@
             <configuration>
               <classifier>sources</classifier>
               <includes>io/netty/**</includes>
+              <includeScope>runtime</includeScope>
               <includeGroupIds>${project.groupId}</includeGroupIds>
               <outputDirectory>${generatedSourceDir}</outputDirectory>
             </configuration>
@@ -326,8 +551,9 @@
               <goal>unpack-dependencies</goal>
             </goals>
             <configuration>
-              <excludes>io/netty/example/**,META-INF/native/libnetty-tcnative*</excludes>
+              <excludes>io/netty/internal/tcnative/**,io/netty/example/**,META-INF/native/libnetty-tcnative*,META-INF/native/include/**,META-INF/native/**/*.a</excludes>
               <includes>io/netty/**,META-INF/native/**</includes>
+              <includeScope>runtime</includeScope>
               <includeGroupIds>${project.groupId}</includeGroupIds>
               <outputDirectory>${project.build.outputDirectory}</outputDirectory>
             </configuration>
@@ -361,7 +587,7 @@
                       </patternset>
                     </unzip>
                     <concat destfile="${project.build.outputDirectory}/META-INF/${project.groupId}.versions.properties" append="true">
-                            <path path="${dependencyVersionsDir}/META-INF/${project.groupId}.versions.properties" />
+                      <path path="${dependencyVersionsDir}/META-INF/${project.groupId}.versions.properties" />
                     </concat>
                   </sequential>
                 </for>
@@ -433,14 +659,14 @@
             <goals>
               <goal>jar</goal>
             </goals>
-        <configuration>
-          <archive>
-            <manifest>
-              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
-            </manifest>
-            <index>true</index>
-          </archive>
-        </configuration>
+            <configuration>
+              <archive>
+                <manifest>
+                  <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                </manifest>
+                <index>true</index>
+              </archive>
+            </configuration>
           </execution>
         </executions>
       </plugin>
@@ -503,73 +729,6 @@
             <phase>none</phase>
           </execution>
         </executions>
-      </plugin>
-
-      <!-- Generate Xref -->
-      <plugin>
-        <artifactId>maven-jxr-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>generate-xref</id>
-            <phase>package</phase>
-            <goals>
-              <goal>jxr</goal>
-            </goals>
-          </execution>
-        </executions>
-        <configuration>
-          <skip>${quickbuild}</skip>
-          <linkJavadoc>true</linkJavadoc>
-          <destDir>${project.build.directory}/xref</destDir>
-          <javadocDir>${project.build.directory}/api</javadocDir>
-          <docTitle>Netty Source Xref (${project.version})</docTitle>
-          <windowTitle>Netty Source Xref (${project.version})</windowTitle>
-        </configuration>
-        <dependencies>
-          <dependency>
-            <groupId>${project.groupId}</groupId>
-            <artifactId>netty-build</artifactId>
-            <version>19</version>
-          </dependency>
-        </dependencies>
-      </plugin>
-
-      <!-- Generate Javadoc -->
-      <plugin>
-        <artifactId>maven-javadoc-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>attach-javadocs</id>
-            <goals>
-              <goal>jar</goal>
-            </goals>
-          </execution>
-        </executions>
-        <configuration>
-          <skip>${quickbuild}</skip>
-          <excludePackageNames>*.internal,*.example</excludePackageNames>
-          <docfilessubdirs>true</docfilessubdirs>
-          <outputDirectory>${project.build.directory}/api</outputDirectory>
-          <overview>${project.basedir}/src/javadoc/overview.html</overview>
-          <doctitle>Netty API Reference (${project.version})</doctitle>
-          <windowtitle>Netty API Reference (${project.version})</windowtitle>
-          <detectJavaApiLink>false</detectJavaApiLink>
-          <additionalparam>
-            -link http://docs.oracle.com/javase/7/docs/api/
-            -link http://code.google.com/apis/protocolbuffers/docs/reference/java/
-            -link http://docs.oracle.com/javaee/6/api/
-            -link http://www.slf4j.org/apidocs/
-            -link http://commons.apache.org/proper/commons-logging/javadocs/api-1.1.2/
-            -link http://logging.apache.org/log4j/1.2/apidocs/
-
-            -group "Low-level data representation" io.netty.buffer*
-            -group "Central interface for all I/O operations" io.netty.channel*
-            -group "Client &amp; Server bootstrapping utilities" io.netty.bootstrap*
-            -group "Reusable I/O event interceptors" io.netty.handler*
-            -group "Miscellaneous" io.netty.util*
-          </additionalparam>
-          <locale>en_US</locale>
-        </configuration>
       </plugin>
     </plugins>
   </build>

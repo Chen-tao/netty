@@ -16,6 +16,8 @@
 package io.netty.resolver.dns;
 
 import io.netty.channel.EventLoop;
+import io.netty.handler.codec.dns.DnsRecord;
+import io.netty.util.internal.UnstableApi;
 
 import java.net.InetAddress;
 import java.util.List;
@@ -23,12 +25,11 @@ import java.util.List;
 /**
  * A cache for DNS resolution entries.
  */
+@UnstableApi
 public interface DnsCache {
 
     /**
      * Clears all the resolved addresses cached by this resolver.
-     *
-     * @return {@code this}
      *
      * @see #clear(String)
      */
@@ -45,24 +46,31 @@ public interface DnsCache {
     /**
      * Return the cached entries for the given hostname.
      * @param hostname the hostname
+     * @param additionals the additional records
      * @return the cached entries
      */
-    List<DnsCacheEntry> get(String hostname);
+    List<? extends DnsCacheEntry> get(String hostname, DnsRecord[] additionals);
 
     /**
-     * Cache a resolved address for a given hostname.
+     * Create a new {@link DnsCacheEntry} and cache a resolved address for a given hostname.
      * @param hostname the hostname
-     * @param address the resolved adresse
+     * @param additionals the additional records
+     * @param address the resolved address
      * @param originalTtl the TLL as returned by the DNS server
      * @param loop the {@link EventLoop} used to register the TTL timeout
+     * @return The {@link DnsCacheEntry} corresponding to this cache entry.
      */
-    void cache(String hostname, InetAddress address, long originalTtl, EventLoop loop);
+    DnsCacheEntry cache(String hostname, DnsRecord[] additionals, InetAddress address, long originalTtl,
+                        EventLoop loop);
 
     /**
      * Cache the resolution failure for a given hostname.
      * @param hostname the hostname
+     * @param additionals the additional records
      * @param cause the resolution failure
      * @param loop the {@link EventLoop} used to register the TTL timeout
+     * @return The {@link DnsCacheEntry} corresponding to this cache entry, or {@code null} if this cache doesn't
+     * support caching failed responses.
      */
-    void cache(String hostname, Throwable cause, EventLoop loop);
+    DnsCacheEntry cache(String hostname, DnsRecord[] additionals, Throwable cause, EventLoop loop);
 }

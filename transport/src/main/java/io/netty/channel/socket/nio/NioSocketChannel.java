@@ -19,18 +19,22 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.channel.FileRegion;
 import io.netty.channel.RecvByteBufAllocator;
+import io.netty.util.internal.SocketUtils;
 import io.netty.channel.nio.AbstractNioByteChannel;
 import io.netty.channel.socket.DefaultSocketChannelConfig;
 import io.netty.channel.socket.ServerSocketChannel;
 import io.netty.channel.socket.SocketChannelConfig;
 import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.internal.OneTimeTask;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.UnstableApi;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -46,8 +50,7 @@ import java.util.concurrent.Executor;
  * {@link io.netty.channel.socket.SocketChannel} which uses NIO selector based implementation.
  */
 public class NioSocketChannel extends AbstractNioByteChannel implements io.netty.channel.socket.SocketChannel {
-
-    private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(NioSocketChannel.class);
     private static final SelectorProvider DEFAULT_SELECTOR_PROVIDER = SelectorProvider.provider();
 
     private static SocketChannel newSocket(SelectorProvider provider) {
@@ -104,11 +107,6 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     @Override
-    public ChannelMetadata metadata() {
-        return METADATA;
-    }
-
-    @Override
     public SocketChannelConfig config() {
         return config;
     }
@@ -125,8 +123,19 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     @Override
+    public boolean isOutputShutdown() {
+        return javaChannel().socket().isOutputShutdown() || !isActive();
+    }
+
+    @Override
     public boolean isInputShutdown() {
-        return super.isInputShutdown();
+        return javaChannel().socket().isInputShutdown() || !isActive();
+    }
+
+    @Override
+    public boolean isShutdown() {
+        Socket socket = javaChannel().socket();
+        return socket.isInputShutdown() && socket.isOutputShutdown() || !isActive();
     }
 
     @Override
@@ -139,9 +148,20 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         return (InetSocketAddress) super.remoteAddress();
     }
 
+    @UnstableApi
     @Override
-    public boolean isOutputShutdown() {
-        return javaChannel().socket().isOutputShutdown() || !isActive();
+    protected final void doShutdownOutput(final Throwable cause) throws Exception {
+        ChannelFuture future = shutdownOutput();
+        if (future.isDone()) {
+            super.doShutdownOutput(cause);
+        } else {
+            future.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    NioSocketChannel.super.doShutdownOutput(cause);
+                }
+            });
+        }
     }
 
     @Override
@@ -153,7 +173,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     public ChannelFuture shutdownOutput(final ChannelPromise promise) {
         Executor closeExecutor = ((NioSocketChannelUnsafe) unsafe()).prepareToClose();
         if (closeExecutor != null) {
-            closeExecutor.execute(new OneTimeTask() {
+            closeExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
                     shutdownOutput0(promise);
@@ -164,7 +184,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
             if (loop.inEventLoop()) {
                 shutdownOutput0(promise);
             } else {
-                loop.execute(new OneTimeTask() {
+                loop.execute(new Runnable() {
                     @Override
                     public void run() {
                         shutdownOutput0(promise);
@@ -175,12 +195,133 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         return promise;
     }
 
+    @Override
+    public ChannelFuture shutdownInput() {
+        return shutdownInput(newPromise());
+    }
+
+    @Override
+    protected boolean isInputShutdown0() {
+        return isInputShutdown();
+    }
+
+    @Override
+    public ChannelFuture shutdownInput(final ChannelPromise promise) {
+        Executor closeExecutor = ((NioSocketChannelUnsafe) unsafe()).prepareToClose();
+        if (closeExecutor != null) {
+            closeExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    shutdownInput0(promise);
+                }
+            });
+        } else {
+            EventLoop loop = eventLoop();
+            if (loop.inEventLoop()) {
+                shutdownInput0(promise);
+            } else {
+                loop.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        shutdownInput0(promise);
+                    }
+                });
+            }
+        }
+        return promise;
+    }
+
+    @Override
+    public ChannelFuture shutdown() {
+        return shutdown(newPromise());
+    }
+
+    @Override
+    public ChannelFuture shutdown(final ChannelPromise promise) {
+        Executor closeExecutor = ((NioSocketChannelUnsafe) unsafe()).prepareToClose();
+        if (closeExecutor != null) {
+            closeExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    shutdown0(promise);
+                }
+            });
+        } else {
+            EventLoop loop = eventLoop();
+            if (loop.inEventLoop()) {
+                shutdown0(promise);
+            } else {
+                loop.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        shutdown0(promise);
+                    }
+                });
+            }
+        }
+        return promise;
+    }
+
     private void shutdownOutput0(final ChannelPromise promise) {
         try {
-            javaChannel().socket().shutdownOutput();
+            shutdownOutput0();
             promise.setSuccess();
         } catch (Throwable t) {
             promise.setFailure(t);
+        }
+    }
+
+    private void shutdownOutput0() throws Exception {
+        try {
+            if (PlatformDependent.javaVersion() >= 7) {
+                javaChannel().shutdownOutput();
+            } else {
+                javaChannel().socket().shutdownOutput();
+            }
+        } finally {
+            ((AbstractUnsafe) unsafe()).shutdownOutput();
+        }
+    }
+
+    private void shutdownInput0(final ChannelPromise promise) {
+        try {
+            shutdownInput0();
+            promise.setSuccess();
+        } catch (Throwable t) {
+            promise.setFailure(t);
+        }
+    }
+
+    private void shutdownInput0() throws Exception {
+        if (PlatformDependent.javaVersion() >= 7) {
+            javaChannel().shutdownInput();
+        } else {
+            javaChannel().socket().shutdownInput();
+        }
+    }
+
+    private void shutdown0(final ChannelPromise promise) {
+        Throwable cause = null;
+        try {
+            shutdownOutput0();
+        } catch (Throwable t) {
+            cause = t;
+        }
+        try {
+            shutdownInput0();
+        } catch (Throwable t) {
+            if (cause == null) {
+                promise.setFailure(t);
+            } else {
+                logger.debug("Exception suppressed because a previous exception occurred.", t);
+                promise.setFailure(cause);
+            }
+            return;
+        }
+        if (cause == null) {
+            promise.setSuccess();
+        } else {
+            promise.setFailure(cause);
         }
     }
 
@@ -196,18 +337,26 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     @Override
     protected void doBind(SocketAddress localAddress) throws Exception {
-        javaChannel().socket().bind(localAddress);
+        doBind0(localAddress);
+    }
+
+    private void doBind0(SocketAddress localAddress) throws Exception {
+        if (PlatformDependent.javaVersion() >= 7) {
+            SocketUtils.bind(javaChannel(), localAddress);
+        } else {
+            SocketUtils.bind(javaChannel().socket(), localAddress);
+        }
     }
 
     @Override
     protected boolean doConnect(SocketAddress remoteAddress, SocketAddress localAddress) throws Exception {
         if (localAddress != null) {
-            javaChannel().socket().bind(localAddress);
+            doBind0(localAddress);
         }
 
         boolean success = false;
         try {
-            boolean connected = javaChannel().connect(remoteAddress);
+            boolean connected = SocketUtils.connect(javaChannel(), remoteAddress);
             if (!connected) {
                 selectionKey().interestOps(SelectionKey.OP_CONNECT);
             }
@@ -253,7 +402,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     @Override
     protected long doWriteFileRegion(FileRegion region) throws Exception {
-        final long position = region.transfered();
+        final long position = region.transferred();
         return region.transferTo(javaChannel(), position);
     }
 
@@ -361,7 +510,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
         @Override
         protected void autoReadCleared() {
-            setReadPending(false);
+            clearReadPending();
         }
     }
 }

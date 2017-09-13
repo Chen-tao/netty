@@ -17,10 +17,12 @@ package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.memcache.AbstractMemcacheObject;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Default implementation of a {@link BinaryMemcacheMessage}.
  */
+@UnstableApi
 public abstract class AbstractBinaryMemcacheMessage
     extends AbstractMemcacheObject
     implements BinaryMemcacheMessage {
@@ -28,7 +30,7 @@ public abstract class AbstractBinaryMemcacheMessage
     /**
      * Contains the optional key.
      */
-    private String key;
+    private ByteBuf key;
 
     /**
      * Contains the optional extras.
@@ -50,13 +52,16 @@ public abstract class AbstractBinaryMemcacheMessage
      * @param key    the message key.
      * @param extras the message extras.
      */
-    protected AbstractBinaryMemcacheMessage(String key, ByteBuf extras) {
+    protected AbstractBinaryMemcacheMessage(ByteBuf key, ByteBuf extras) {
         this.key = key;
+        keyLength = key == null ? 0 : (short) key.readableBytes();
         this.extras = extras;
+        extrasLength = extras == null ? 0 : (byte) extras.readableBytes();
+        totalBodyLength = keyLength + extrasLength;
     }
 
     @Override
-    public String key() {
+    public ByteBuf key() {
         return key;
     }
 
@@ -66,14 +71,26 @@ public abstract class AbstractBinaryMemcacheMessage
     }
 
     @Override
-    public BinaryMemcacheMessage setKey(String key) {
+    public BinaryMemcacheMessage setKey(ByteBuf key) {
+        if (this.key != null) {
+            this.key.release();
+        }
         this.key = key;
+        short oldKeyLength = keyLength;
+        keyLength = key == null ? 0 : (short) key.readableBytes();
+        totalBodyLength  = totalBodyLength + keyLength - oldKeyLength;
         return this;
     }
 
     @Override
     public BinaryMemcacheMessage setExtras(ByteBuf extras) {
+        if (this.extras != null) {
+            this.extras.release();
+        }
         this.extras = extras;
+        short oldExtrasLength = extrasLength;
+        extrasLength = extras == null ? 0 : (byte) extras.readableBytes();
+        totalBodyLength = totalBodyLength + extrasLength - oldExtrasLength;
         return this;
     }
 
@@ -137,8 +154,14 @@ public abstract class AbstractBinaryMemcacheMessage
         return extrasLength;
     }
 
-    @Override
-    public BinaryMemcacheMessage setExtrasLength(byte extrasLength) {
+    /**
+     * Set the extras length of the message.
+     * <p/>
+     * This may be 0, since the extras content is optional.
+     *
+     * @param extrasLength the extras length.
+     */
+    BinaryMemcacheMessage setExtrasLength(byte extrasLength) {
         this.extrasLength = extrasLength;
         return this;
     }
@@ -148,8 +171,14 @@ public abstract class AbstractBinaryMemcacheMessage
         return keyLength;
     }
 
-    @Override
-    public BinaryMemcacheMessage setKeyLength(short keyLength) {
+    /**
+     * Set the key length of the message.
+     * <p/>
+     * This may be 0, since the key is optional.
+     *
+     * @param keyLength the key length to use.
+     */
+    BinaryMemcacheMessage setKeyLength(short keyLength) {
         this.keyLength = keyLength;
         return this;
     }
@@ -166,52 +195,38 @@ public abstract class AbstractBinaryMemcacheMessage
     }
 
     @Override
-    public int refCnt() {
-        if (extras != null) {
-            return extras.refCnt();
-        }
-        return 1;
-    }
-
-    @Override
     public BinaryMemcacheMessage retain() {
-        if (extras != null) {
-            extras.retain();
-        }
+        super.retain();
         return this;
     }
 
     @Override
     public BinaryMemcacheMessage retain(int increment) {
-        if (extras != null) {
-            extras.retain(increment);
-        }
+        super.retain(increment);
         return this;
     }
 
     @Override
-    public boolean release() {
-        if (extras != null) {
-            return extras.release();
+    protected void deallocate() {
+        if (key != null) {
+            key.release();
         }
-        return false;
-    }
-
-    @Override
-    public boolean release(int decrement) {
         if (extras != null) {
-            return extras.release(decrement);
+            extras.release();
         }
-        return false;
     }
 
     @Override
     public BinaryMemcacheMessage touch() {
-        return touch(null);
+        super.touch();
+        return this;
     }
 
     @Override
     public BinaryMemcacheMessage touch(Object hint) {
+        if (key != null) {
+            key.touch(hint);
+        }
         if (extras != null) {
             extras.touch(hint);
         }

@@ -15,10 +15,13 @@
 
 package io.netty.handler.codec.http2;
 
+import io.netty.util.internal.UnstableApi;
+
 /**
  * An object (used by remote flow control) that is responsible for distributing the bytes to be
  * written across the streams in the connection.
  */
+@UnstableApi
 public interface StreamByteDistributor {
 
     /**
@@ -35,7 +38,7 @@ public interface StreamByteDistributor {
          * Get the amount of bytes this stream has pending to send. The actual amount written must not exceed
          * {@link #windowSize()}!
          * @return The amount of bytes this stream has pending to send.
-         * @see {@link io.netty.handler.codec.http2.Http2CodecUtil#streamableBytes(StreamState)}
+         * @see Http2CodecUtil#streamableBytes(StreamState)
          */
         int pendingBytes();
 
@@ -51,7 +54,7 @@ public interface StreamByteDistributor {
          * an stream has been given a chance to write an empty frame, and also enables optimizations like not writing
          * empty frames in some situations (don't write headers until data can also be written).
          * @return the size of the stream's flow control window.
-         * @see {@link io.netty.handler.codec.http2.Http2CodecUtil#streamableBytes(StreamState)}
+         * @see Http2CodecUtil#streamableBytes(StreamState)
          */
         int windowSize();
     }
@@ -77,6 +80,17 @@ public interface StreamByteDistributor {
      * streamable bytes.
      */
     void updateStreamableBytes(StreamState state);
+
+    /**
+     * Explicitly update the dependency tree. This method is called independently of stream state changes.
+     * @param childStreamId The stream identifier associated with the child stream.
+     * @param parentStreamId The stream identifier associated with the parent stream. May be {@code 0},
+     *                       to make {@code childStreamId} and immediate child of the connection.
+     * @param weight The weight which is used relative to other child streams for {@code parentStreamId}. This value
+     *               must be between 1 and 256 (inclusive).
+     * @param exclusive If {@code childStreamId} should be the exclusive dependency of {@code parentStreamId}.
+     */
+    void updateDependencyTree(int childStreamId, int parentStreamId, short weight, boolean exclusive);
 
     /**
      * Distributes up to {@code maxBytes} to those streams containing streamable bytes and

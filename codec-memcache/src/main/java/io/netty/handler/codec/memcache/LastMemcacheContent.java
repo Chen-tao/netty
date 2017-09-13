@@ -18,6 +18,7 @@ package io.netty.handler.codec.memcache;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderResult;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The {@link MemcacheContent} which signals the end of the content batch.
@@ -26,6 +27,7 @@ import io.netty.handler.codec.DecoderResult;
  * empty {@link LastMemcacheContent} is issued to make the upstream parsing
  * easier.
  */
+@UnstableApi
 public interface LastMemcacheContent extends MemcacheContent {
 
     LastMemcacheContent EMPTY_LAST_CONTENT = new LastMemcacheContent() {
@@ -33,6 +35,21 @@ public interface LastMemcacheContent extends MemcacheContent {
         @Override
         public LastMemcacheContent copy() {
             return EMPTY_LAST_CONTENT;
+        }
+
+        @Override
+        public LastMemcacheContent duplicate() {
+            return this;
+        }
+
+        @Override
+        public LastMemcacheContent retainedDuplicate() {
+            return this;
+        }
+
+        @Override
+        public LastMemcacheContent replace(ByteBuf content) {
+            return new DefaultLastMemcacheContent(content);
         }
 
         @Override
@@ -52,11 +69,6 @@ public interface LastMemcacheContent extends MemcacheContent {
 
         @Override
         public LastMemcacheContent touch(Object hint) {
-            return this;
-        }
-
-        @Override
-        public LastMemcacheContent duplicate() {
             return this;
         }
 
@@ -95,6 +107,15 @@ public interface LastMemcacheContent extends MemcacheContent {
     LastMemcacheContent copy();
 
     @Override
+    LastMemcacheContent duplicate();
+
+    @Override
+    LastMemcacheContent retainedDuplicate();
+
+    @Override
+    LastMemcacheContent replace(ByteBuf content);
+
+    @Override
     LastMemcacheContent retain(int increment);
 
     @Override
@@ -105,7 +126,4 @@ public interface LastMemcacheContent extends MemcacheContent {
 
     @Override
     LastMemcacheContent touch(Object hint);
-
-    @Override
-    LastMemcacheContent duplicate();
 }

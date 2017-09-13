@@ -14,37 +14,47 @@
  */
 package io.netty.handler.codec.http2;
 
-import static io.netty.handler.codec.base64.Base64Dialect.URL_SAFE;
-import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_PROTOCOL_NAME;
-import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_SETTINGS_HEADER;
-import static io.netty.handler.codec.http2.Http2CodecUtil.SETTING_ENTRY_LENGTH;
-import static io.netty.handler.codec.http2.Http2CodecUtil.writeUnsignedInt;
-import static io.netty.handler.codec.http2.Http2CodecUtil.writeUnsignedShort;
-import static io.netty.util.CharsetUtil.UTF_8;
-import static io.netty.util.ReferenceCountUtil.release;
-import static io.netty.util.internal.ObjectUtil.checkNotNull;
-
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.base64.Base64;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientUpgradeHandler;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.util.collection.CharObjectMap;
+import io.netty.util.internal.UnstableApi;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import static io.netty.handler.codec.base64.Base64Dialect.URL_SAFE;
+import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_PROTOCOL_NAME;
+import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_SETTINGS_HEADER;
+import static io.netty.handler.codec.http2.Http2CodecUtil.SETTING_ENTRY_LENGTH;
+import static io.netty.util.CharsetUtil.UTF_8;
+import static io.netty.util.ReferenceCountUtil.release;
+import static io.netty.util.internal.ObjectUtil.checkNotNull;
+
 /**
  * Client-side cleartext upgrade codec from HTTP to HTTP/2.
  */
+@UnstableApi
 public class Http2ClientUpgradeCodec implements HttpClientUpgradeHandler.UpgradeCodec {
 
     private static final List<CharSequence> UPGRADE_HEADERS = Collections.singletonList(HTTP_UPGRADE_SETTINGS_HEADER);
 
     private final String handlerName;
     private final Http2ConnectionHandler connectionHandler;
+    private final ChannelHandler upgradeToHandler;
+
+    public Http2ClientUpgradeCodec(Http2FrameCodec frameCodec, ChannelHandler upgradeToHandler) {
+        this(null, frameCodec, upgradeToHandler);
+    }
+
+    public Http2ClientUpgradeCodec(String handlerName, Http2FrameCodec frameCodec, ChannelHandler upgradeToHandler) {
+        this(handlerName, (Http2ConnectionHandler) frameCodec, upgradeToHandler);
+    }
 
     /**
      * Creates the codec using a default name for the connection handler when adding to the
@@ -53,7 +63,7 @@ public class Http2ClientUpgradeCodec implements HttpClientUpgradeHandler.Upgrade
      * @param connectionHandler the HTTP/2 connection handler
      */
     public Http2ClientUpgradeCodec(Http2ConnectionHandler connectionHandler) {
-        this(null, connectionHandler);
+        this((String) null, connectionHandler);
     }
 
     /**
@@ -64,8 +74,14 @@ public class Http2ClientUpgradeCodec implements HttpClientUpgradeHandler.Upgrade
      * @param connectionHandler the HTTP/2 connection handler
      */
     public Http2ClientUpgradeCodec(String handlerName, Http2ConnectionHandler connectionHandler) {
+        this(handlerName, connectionHandler, connectionHandler);
+    }
+
+    private Http2ClientUpgradeCodec(String handlerName, Http2ConnectionHandler connectionHandler, ChannelHandler
+                                    upgradeToHandler) {
         this.handlerName = handlerName;
         this.connectionHandler = checkNotNull(connectionHandler, "connectionHandler");
+        this.upgradeToHandler = checkNotNull(upgradeToHandler, "upgradeToHandler");
     }
 
     @Override
@@ -88,7 +104,7 @@ public class Http2ClientUpgradeCodec implements HttpClientUpgradeHandler.Upgrade
         connectionHandler.onHttpClientUpgrade();
 
         // Add the handler to the pipeline.
-        ctx.pipeline().addAfter(ctx.name(), handlerName, connectionHandler);
+        ctx.pipeline().addAfter(ctx.name(), handlerName, upgradeToHandler);
     }
 
     /**
@@ -106,8 +122,8 @@ public class Http2ClientUpgradeCodec implements HttpClientUpgradeHandler.Upgrade
             int payloadLength = SETTING_ENTRY_LENGTH * settings.size();
             buf = ctx.alloc().buffer(payloadLength);
             for (CharObjectMap.PrimitiveEntry<Long> entry : settings.entries()) {
-                writeUnsignedShort(entry.key(), buf);
-                writeUnsignedInt(entry.value(), buf);
+                buf.writeChar(entry.key());
+                buf.writeInt(entry.value().intValue());
             }
 
             // Base64 encode the payload and then convert to a string for the header.

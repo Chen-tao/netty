@@ -41,14 +41,46 @@ public class DefaultByteBufHolder implements ByteBufHolder {
         return data;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This method calls {@code replace(content().copy())} by default.
+     */
     @Override
     public ByteBufHolder copy() {
-        return new DefaultByteBufHolder(data.copy());
+        return replace(data.copy());
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This method calls {@code replace(content().duplicate())} by default.
+     */
     @Override
     public ByteBufHolder duplicate() {
-        return new DefaultByteBufHolder(data.duplicate());
+        return replace(data.duplicate());
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This method calls {@code replace(content().retainedDuplicate())} by default.
+     */
+    @Override
+    public ByteBufHolder retainedDuplicate() {
+        return replace(data.retainedDuplicate());
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Override this method to return a new instance of this object whose content is set to the specified
+     * {@code content}. The default implementation of {@link #copy()}, {@link #duplicate()} and
+     * {@link #retainedDuplicate()} invokes this method to create a copy.
+     */
+    @Override
+    public ByteBufHolder replace(ByteBuf content) {
+        return new DefaultByteBufHolder(content);
     }
 
     @Override
@@ -91,7 +123,7 @@ public class DefaultByteBufHolder implements ByteBufHolder {
     }
 
     /**
-     * Return {@link ByteBuf#toString()} without checking the reference count first. This is useful to implemement
+     * Return {@link ByteBuf#toString()} without checking the reference count first. This is useful to implement
      * {@link #toString()}.
      */
     protected final String contentToString() {
@@ -101,5 +133,21 @@ public class DefaultByteBufHolder implements ByteBufHolder {
     @Override
     public String toString() {
         return StringUtil.simpleClassName(this) + '(' + contentToString() + ')';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o instanceof ByteBufHolder) {
+            return data.equals(((ByteBufHolder) o).content());
+        }
+        return false;
+    }
+
+    @Override
+    public int hashCode() {
+        return data.hashCode();
     }
 }

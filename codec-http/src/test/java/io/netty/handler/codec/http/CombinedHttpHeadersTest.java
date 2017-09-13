@@ -18,10 +18,12 @@ package io.netty.handler.codec.http;
 import io.netty.handler.codec.http.HttpHeadersTestUtils.HeaderValue;
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
 
 import static io.netty.util.AsciiString.contentEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class CombinedHttpHeadersTest {
@@ -101,7 +103,7 @@ public class CombinedHttpHeadersTest {
         final CombinedHttpHeaders headers = newCombinedHttpHeaders();
         headers.add(HEADER_NAME, HeaderValue.SIX_QUOTED.subset(4));
         assertTrue(contentEquals(HeaderValue.SIX_QUOTED.subsetAsCsvString(4), headers.get(HEADER_NAME)));
-        assertTrue(contentEquals(HeaderValue.SIX_QUOTED.subsetAsCsvString(4), headers.getAll(HEADER_NAME).get(0)));
+        assertEquals(HeaderValue.SIX_QUOTED.subset(4), headers.getAll(HEADER_NAME));
     }
 
     @Test
@@ -109,7 +111,7 @@ public class CombinedHttpHeadersTest {
         final CombinedHttpHeaders headers = newCombinedHttpHeaders();
         headers.add(HEADER_NAME, HeaderValue.EIGHT.subset(6));
         assertTrue(contentEquals(HeaderValue.EIGHT.subsetAsCsvString(6), headers.get(HEADER_NAME)));
-        assertTrue(contentEquals(HeaderValue.EIGHT.subsetAsCsvString(6), headers.getAll(HEADER_NAME).get(0)));
+        assertEquals(HeaderValue.EIGHT.subset(6), headers.getAll(HEADER_NAME));
     }
 
     @Test (expected = NullPointerException.class)
@@ -165,10 +167,10 @@ public class CombinedHttpHeadersTest {
     }
 
     @Test
-    public void addIterableCsvEmtpy() {
+    public void addIterableCsvEmpty() {
         final CombinedHttpHeaders headers = newCombinedHttpHeaders();
         headers.add(HEADER_NAME, Collections.<CharSequence>emptyList());
-        assertTrue(contentEquals("", headers.getAll(HEADER_NAME).get(0)));
+        assertEquals(Arrays.asList(""), headers.getAll(HEADER_NAME));
     }
 
     @Test
@@ -234,7 +236,7 @@ public class CombinedHttpHeadersTest {
 
     private static void assertCsvValues(final CombinedHttpHeaders headers, final HeaderValue headerValue) {
         assertTrue(contentEquals(headerValue.asCsv(), headers.get(HEADER_NAME)));
-        assertTrue(contentEquals(headerValue.asCsv(), headers.getAll(HEADER_NAME).get(0)));
+        assertEquals(headerValue.asList(), headers.getAll(HEADER_NAME));
     }
 
     private static void assertCsvValue(final CombinedHttpHeaders headers, final HeaderValue headerValue) {
@@ -252,5 +254,50 @@ public class CombinedHttpHeadersTest {
         for (HeaderValue v: headerValues) {
             headers.add(HEADER_NAME, v.toString());
         }
+    }
+
+    @Test
+    public void testGetAll() {
+        final CombinedHttpHeaders headers = newCombinedHttpHeaders();
+        headers.set(HEADER_NAME, Arrays.asList("a", "b", "c"));
+        assertEquals(Arrays.asList("a", "b", "c"), headers.getAll(HEADER_NAME));
+        headers.set(HEADER_NAME, Arrays.asList("a,", "b,", "c,"));
+        assertEquals(Arrays.asList("a,", "b,", "c,"), headers.getAll(HEADER_NAME));
+        headers.set(HEADER_NAME, Arrays.asList("a\"", "b\"", "c\""));
+        assertEquals(Arrays.asList("a\"", "b\"", "c\""), headers.getAll(HEADER_NAME));
+        headers.set(HEADER_NAME, Arrays.asList("\"a\"", "\"b\"", "\"c\""));
+        assertEquals(Arrays.asList("a", "b", "c"), headers.getAll(HEADER_NAME));
+        headers.set(HEADER_NAME, "a,b,c");
+        assertEquals(Arrays.asList("a,b,c"), headers.getAll(HEADER_NAME));
+        headers.set(HEADER_NAME, "\"a,b,c\"");
+        assertEquals(Arrays.asList("a,b,c"), headers.getAll(HEADER_NAME));
+    }
+
+    @Test
+    public void owsTrimming() {
+        final CombinedHttpHeaders headers = newCombinedHttpHeaders();
+        headers.set(HEADER_NAME, Arrays.asList("\ta", "   ", "  b ", "\t \t"));
+        headers.add(HEADER_NAME, " c, d \t");
+
+        assertEquals(Arrays.asList("a", "", "b", "", "c, d"), headers.getAll(HEADER_NAME));
+        assertEquals("a,,b,,\"c, d\"", headers.get(HEADER_NAME));
+
+        assertTrue(headers.containsValue(HEADER_NAME, "a", true));
+        assertTrue(headers.containsValue(HEADER_NAME, " a ", true));
+        assertTrue(headers.containsValue(HEADER_NAME, "a", true));
+        assertFalse(headers.containsValue(HEADER_NAME, "a,b", true));
+
+        assertFalse(headers.containsValue(HEADER_NAME, " c, d ", true));
+        assertFalse(headers.containsValue(HEADER_NAME, "c, d", true));
+        assertTrue(headers.containsValue(HEADER_NAME, " c ", true));
+        assertTrue(headers.containsValue(HEADER_NAME, "d", true));
+
+        assertTrue(headers.containsValue(HEADER_NAME, "\t", true));
+        assertTrue(headers.containsValue(HEADER_NAME, "", true));
+
+        assertFalse(headers.containsValue(HEADER_NAME, "e", true));
+
+        HttpHeaders copiedHeaders = newCombinedHttpHeaders().add(headers);
+        assertEquals(Arrays.asList("a", "", "b", "", "c, d"), copiedHeaders.getAll(HEADER_NAME));
     }
 }

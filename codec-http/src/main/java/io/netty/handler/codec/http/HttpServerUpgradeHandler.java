@@ -60,24 +60,24 @@ public class HttpServerUpgradeHandler extends HttpObjectAggregator {
         Collection<CharSequence> requiredUpgradeHeaders();
 
         /**
-         * Adds any headers to the 101 Switching protocols response that are appropriate for this protocol.
+         * Prepares the {@code upgradeHeaders} for a protocol update based upon the contents of {@code upgradeRequest}.
+         * This method returns a boolean value to proceed or abort the upgrade in progress. If {@code false} is
+         * returned, the upgrade is aborted and the {@code upgradeRequest} will be passed through the inbound pipeline
+         * as if no upgrade was performed. If {@code true} is returned, the upgrade will proceed to the next
+         * step which invokes {@link #upgradeTo}. When returning {@code true}, you can add headers to
+         * the {@code upgradeHeaders} so that they are added to the 101 Switching protocols response.
          */
-        void prepareUpgradeResponse(ChannelHandlerContext ctx, FullHttpRequest upgradeRequest,
-                                    FullHttpResponse upgradeResponse);
+        boolean prepareUpgradeResponse(ChannelHandlerContext ctx, FullHttpRequest upgradeRequest,
+                                    HttpHeaders upgradeHeaders);
 
         /**
          * Performs an HTTP protocol upgrade from the source codec. This method is responsible for
          * adding all handlers required for the new protocol.
          *
          * @param ctx the context for the current handler.
-         * @param upgradeRequest the request that triggered the upgrade to this protocol. The
-         *            upgraded protocol is responsible for sending the response.
-         * @param upgradeResponse a 101 Switching Protocols response that is populated with the
-         *            {@link HttpHeaderNames#CONNECTION} and {@link HttpHeaderNames#UPGRADE} headers.
-         *            The protocol is required to send this before sending any other frames back to the client.
-         *            The headers may be augmented as necessary by the protocol before sending.
+         * @param upgradeRequest the request that triggered the upgrade to this protocol.
          */
-        void upgradeTo(ChannelHandlerContext ctx, FullHttpRequest upgradeRequest, FullHttpResponse upgradeResponse);
+        void upgradeTo(ChannelHandlerContext ctx, FullHttpRequest upgradeRequest);
     }
 
     /**
@@ -103,7 +103,7 @@ public class HttpServerUpgradeHandler extends HttpObjectAggregator {
         private final CharSequence protocol;
         private final FullHttpRequest upgradeRequest;
 
-        private UpgradeEvent(CharSequence protocol, FullHttpRequest upgradeRequest) {
+        UpgradeEvent(CharSequence protocol, FullHttpRequest upgradeRequest) {
             this.protocol = protocol;
             this.upgradeRequest = upgradeRequest;
         }
@@ -158,7 +158,7 @@ public class HttpServerUpgradeHandler extends HttpObjectAggregator {
 
         @Override
         public boolean release(int decrement) {
-            return upgradeRequest.release();
+            return upgradeRequest.release(decrement);
         }
 
         @Override
@@ -304,13 +304,15 @@ public class HttpServerUpgradeHandler extends HttpObjectAggregator {
             }
         }
 
-        // Create the user event to be fired once the upgrade completes.
-        final UpgradeEvent event = new UpgradeEvent(upgradeProtocol, request);
-
         // Prepare and send the upgrade response. Wait for this write to complete before upgrading,
         // since we need the old codec in-place to properly encode the response.
         final FullHttpResponse upgradeResponse = createUpgradeResponse(upgradeProtocol);
-        upgradeCodec.prepareUpgradeResponse(ctx, request, upgradeResponse);
+        if (!upgradeCodec.prepareUpgradeResponse(ctx, request, upgradeResponse.headers())) {
+            return false;
+        }
+
+        // Create the user event to be fired once the upgrade completes.
+        final UpgradeEvent event = new UpgradeEvent(upgradeProtocol, request);
 
         final UpgradeCodec finalUpgradeCodec = upgradeCodec;
         ctx.writeAndFlush(upgradeResponse).addListener(new ChannelFutureListener() {
@@ -320,7 +322,7 @@ public class HttpServerUpgradeHandler extends HttpObjectAggregator {
                     if (future.isSuccess()) {
                         // Perform the upgrade to the new protocol.
                         sourceCodec.upgradeFrom(ctx);
-                        finalUpgradeCodec.upgradeTo(ctx, request, upgradeResponse);
+                        finalUpgradeCodec.upgradeTo(ctx, request);
 
                         // Notify that the upgrade has occurred. Retain the event to offset
                         // the release() in the finally block.

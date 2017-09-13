@@ -18,14 +18,21 @@ package io.netty.channel.rxtx;
 import gnu.io.CommPort;
 import gnu.io.CommPortIdentifier;
 import gnu.io.SerialPort;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.oio.OioByteStreamChannel;
-import io.netty.util.internal.OneTimeTask;
 
 import java.net.SocketAddress;
 import java.util.concurrent.TimeUnit;
 
-import static io.netty.channel.rxtx.RxtxChannelOption.*;
+import static io.netty.channel.rxtx.RxtxChannelOption.BAUD_RATE;
+import static io.netty.channel.rxtx.RxtxChannelOption.DATA_BITS;
+import static io.netty.channel.rxtx.RxtxChannelOption.DTR;
+import static io.netty.channel.rxtx.RxtxChannelOption.PARITY_BIT;
+import static io.netty.channel.rxtx.RxtxChannelOption.READ_TIMEOUT;
+import static io.netty.channel.rxtx.RxtxChannelOption.RTS;
+import static io.netty.channel.rxtx.RxtxChannelOption.STOP_BITS;
+import static io.netty.channel.rxtx.RxtxChannelOption.WAIT_TIME;
 
 /**
  * A channel to a serial device using the RXTX library.
@@ -129,6 +136,16 @@ public class RxtxChannel extends OioByteStreamChannel {
         }
     }
 
+    @Override
+    protected boolean isInputShutdown() {
+        return !open;
+    }
+
+    @Override
+    protected ChannelFuture shutdownInput() {
+        return newFailedFuture(new UnsupportedOperationException("shutdownInput"));
+    }
+
     private final class RxtxUnsafe extends AbstractUnsafe {
         @Override
         public void connect(
@@ -144,7 +161,7 @@ public class RxtxChannel extends OioByteStreamChannel {
 
                 int waitTime = config().getOption(WAIT_TIME);
                 if (waitTime > 0) {
-                    eventLoop().schedule(new OneTimeTask() {
+                    eventLoop().schedule(new Runnable() {
                         @Override
                         public void run() {
                             try {

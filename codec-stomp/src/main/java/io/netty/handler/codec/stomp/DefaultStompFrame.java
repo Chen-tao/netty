@@ -45,12 +45,22 @@ public class DefaultStompFrame extends DefaultStompHeadersSubframe implements St
 
     @Override
     public StompFrame copy() {
-        return new DefaultStompFrame(command, content.copy());
+        return replace(content.copy());
     }
 
     @Override
     public StompFrame duplicate() {
-        return new DefaultStompFrame(command, content.duplicate());
+        return replace(content.duplicate());
+    }
+
+    @Override
+    public StompFrame retainedDuplicate() {
+        return replace(content.retainedDuplicate());
+    }
+
+    @Override
+    public StompFrame replace(ByteBuf content) {
+        return new DefaultStompFrame(command, content);
     }
 
     @Override
@@ -66,7 +76,7 @@ public class DefaultStompFrame extends DefaultStompHeadersSubframe implements St
 
     @Override
     public StompFrame retain(int increment) {
-        content.retain();
+        content.retain(increment);
         return this;
     }
 
@@ -94,7 +104,7 @@ public class DefaultStompFrame extends DefaultStompHeadersSubframe implements St
 
     @Override
     public String toString() {
-        return "DefaultFullStompFrame{" +
+        return "DefaultStompFrame{" +
             "command=" + command +
             ", headers=" + headers +
             ", content=" + content.toString(CharsetUtil.UTF_8) +

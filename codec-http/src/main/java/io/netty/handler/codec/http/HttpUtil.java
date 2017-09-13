@@ -15,7 +15,6 @@
  */
 package io.netty.handler.codec.http;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.util.AsciiString;
 import io.netty.util.CharsetUtil;
 
@@ -40,6 +39,7 @@ public final class HttpUtil {
     @Deprecated
     static final EmptyHttpHeaders EMPTY_HEADERS = new EmptyHttpHeaders();
     private static final AsciiString CHARSET_EQUALS = AsciiString.of(HttpHeaderValues.CHARSET + "=");
+    private static final AsciiString SEMICOLON = AsciiString.cached(";");
 
     private HttpUtil() { }
 
@@ -53,7 +53,7 @@ public final class HttpUtil {
     }
 
     /**
-     * Determine if a uri is in asteric-form according to
+     * Determine if a uri is in asterisk-form according to
      * <a href="https://tools.ietf.org/html/rfc7230#section-5.3">rfc7230, 5.3</a>.
      */
     public static boolean isAsteriskForm(URI uri) {
@@ -171,14 +171,14 @@ public final class HttpUtil {
     }
 
     /**
-     * Returns the length of the content. Please note that this value is
-     * not retrieved from {@link HttpContent#content()} but from the
-     * {@code "Content-Length"} header, and thus they are independent from each
-     * other.
+     * Returns the length of the content or the specified default value if the message does not have the {@code
+     * "Content-Length" header}. Please note that this value is not retrieved from {@link HttpContent#content()} but
+     * from the {@code "Content-Length"} header, and thus they are independent from each other.
      *
-     * @return the content length or {@code defaultValue} if this message does
-     *         not have the {@code "Content-Length"} header or its value is not
-     *         a number
+     * @param message      the message
+     * @param defaultValue the default value
+     * @return the content length or the specified default value
+     * @throws NumberFormatException if the {@code "Content-Length"} header does not parse as a long
      */
     public static long getContentLength(HttpMessage message, long defaultValue) {
         String value = message.headers().get(HttpHeaderNames.CONTENT_LENGTH);
@@ -212,7 +212,7 @@ public final class HttpUtil {
      * specified message is not a web socket message, {@code -1} is returned.
      */
     private static int getWebSocketContentLength(HttpMessage message) {
-        // WebSockset messages have constant content-lengths.
+        // WebSocket messages have constant content-lengths.
         HttpHeaders h = message.headers();
         if (message instanceof HttpRequest) {
             HttpRequest req = (HttpRequest) message;
@@ -246,36 +246,54 @@ public final class HttpUtil {
     }
 
     /**
-     * Returns {@code true} if and only if the specified message contains the
-     * {@code "Expect: 100-continue"} header.
+     * Returns {@code true} if and only if the specified message contains an expect header and the only expectation
+     * present is the 100-continue expectation. Note that this method returns {@code false} if the expect header is
+     * not valid for the message (e.g., the message is a response, or the version on the message is HTTP/1.0).
+     *
+     * @param message the message
+     * @return {@code true} if and only if the expectation 100-continue is present and it is the only expectation
+     * present
      */
     public static boolean is100ContinueExpected(HttpMessage message) {
-        // Expect: 100-continue is for requests only.
-        if (!(message instanceof HttpRequest)) {
+        if (!isExpectHeaderValid(message)) {
             return false;
         }
 
-        // It works only on HTTP/1.1 or later.
-        if (message.protocolVersion().compareTo(HttpVersion.HTTP_1_1) < 0) {
+        final String expectValue = message.headers().get(HttpHeaderNames.EXPECT);
+        // unquoted tokens in the expect header are case-insensitive, thus 100-continue is case insensitive
+        return HttpHeaderValues.CONTINUE.toString().equalsIgnoreCase(expectValue);
+    }
+
+    /**
+     * Returns {@code true} if the specified message contains an expect header specifying an expectation that is not
+     * supported. Note that this method returns {@code false} if the expect header is not valid for the message
+     * (e.g., the message is a response, or the version on the message is HTTP/1.0).
+     *
+     * @param message the message
+     * @return {@code true} if and only if an expectation is present that is not supported
+     */
+    static boolean isUnsupportedExpectation(HttpMessage message) {
+        if (!isExpectHeaderValid(message)) {
             return false;
         }
 
-        // In most cases, there will be one or zero 'Expect' header.
-        CharSequence value = message.headers().get(HttpHeaderNames.EXPECT);
-        if (value == null) {
-            return false;
-        }
-        if (HttpHeaderValues.CONTINUE.contentEqualsIgnoreCase(value)) {
-            return true;
-        }
+        final String expectValue = message.headers().get(HttpHeaderNames.EXPECT);
+        return expectValue != null && !HttpHeaderValues.CONTINUE.toString().equalsIgnoreCase(expectValue);
+    }
 
-        // Multiple 'Expect' headers.  Search through them.
-        return message.headers().contains(HttpHeaderNames.EXPECT, HttpHeaderValues.CONTINUE, true);
+    private static boolean isExpectHeaderValid(final HttpMessage message) {
+        /*
+         * Expect: 100-continue is for requests only and it works only on HTTP/1.1 or later. Note further that RFC 7231
+         * section 5.1.1 says "A server that receives a 100-continue expectation in an HTTP/1.0 request MUST ignore
+         * that expectation."
+         */
+        return message instanceof HttpRequest &&
+                message.protocolVersion().compareTo(HttpVersion.HTTP_1_1) >= 0;
     }
 
     /**
      * Sets or removes the {@code "Expect: 100-continue"} header to / from the
-     * specified message. If the specified {@code value} is {@code true},
+     * specified message. If {@code expected} is {@code true},
      * the {@code "Expect: 100-continue"} header is set and all other previous
      * {@code "Expect"} headers are removed.  Otherwise, all {@code "Expect"}
      * headers are removed completely.
@@ -307,7 +325,7 @@ public final class HttpUtil {
      */
     public static void setTransferEncodingChunked(HttpMessage m, boolean chunked) {
         if (chunked) {
-            m.headers().add(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
+            m.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
             m.headers().remove(HttpHeaderNames.CONTENT_LENGTH);
         } else {
             List<String> encodings = m.headers().getAll(HttpHeaderNames.TRANSFER_ENCODING);
@@ -333,7 +351,8 @@ public final class HttpUtil {
     /**
      * Fetch charset from message's Content-Type header.
      *
-     * @return the charset from message's Content-Type header or {@link io.netty.util.CharsetUtil#ISO_8859_1}
+     * @param message entity to fetch Content-Type header from
+     * @return the charset from message's Content-Type header or {@link CharsetUtil#ISO_8859_1}
      * if charset is not presented or unparsable
      */
     public static Charset getCharset(HttpMessage message) {
@@ -341,17 +360,55 @@ public final class HttpUtil {
     }
 
     /**
+     * Fetch charset from Content-Type header value.
+     *
+     * @param contentTypeValue Content-Type header value to parse
+     * @return the charset from message's Content-Type header or {@link CharsetUtil#ISO_8859_1}
+     * if charset is not presented or unparsable
+     */
+    public static Charset getCharset(CharSequence contentTypeValue) {
+        if (contentTypeValue != null) {
+            return getCharset(contentTypeValue, CharsetUtil.ISO_8859_1);
+        } else {
+            return CharsetUtil.ISO_8859_1;
+        }
+    }
+
+    /**
      * Fetch charset from message's Content-Type header.
      *
+     * @param message entity to fetch Content-Type header from
+     * @param defaultCharset result to use in case of empty, incorrect or doesn't contain required part header value
      * @return the charset from message's Content-Type header or {@code defaultCharset}
      * if charset is not presented or unparsable
      */
     public static Charset getCharset(HttpMessage message, Charset defaultCharset) {
-        CharSequence charsetCharSequence = getCharsetAsString(message);
-        if (charsetCharSequence != null) {
-            try {
-                return Charset.forName(charsetCharSequence.toString());
-            } catch (UnsupportedCharsetException unsupportedException) {
+        CharSequence contentTypeValue = message.headers().get(HttpHeaderNames.CONTENT_TYPE);
+        if (contentTypeValue != null) {
+            return getCharset(contentTypeValue, defaultCharset);
+        } else {
+            return defaultCharset;
+        }
+    }
+
+    /**
+     * Fetch charset from Content-Type header value.
+     *
+     * @param contentTypeValue Content-Type header value to parse
+     * @param defaultCharset result to use in case of empty, incorrect or doesn't contain required part header value
+     * @return the charset from message's Content-Type header or {@code defaultCharset}
+     * if charset is not presented or unparsable
+     */
+    public static Charset getCharset(CharSequence contentTypeValue, Charset defaultCharset) {
+        if (contentTypeValue != null) {
+            CharSequence charsetCharSequence = getCharsetAsSequence(contentTypeValue);
+            if (charsetCharSequence != null) {
+                try {
+                    return Charset.forName(charsetCharSequence.toString());
+                } catch (UnsupportedCharsetException ignored) {
+                    return defaultCharset;
+                }
+            } else {
                 return defaultCharset;
             }
         } else {
@@ -360,35 +417,106 @@ public final class HttpUtil {
     }
 
     /**
-     * Fetch charset string from message's Content-Type header.
+     * Fetch charset from message's Content-Type header as a char sequence.
      *
      * A lot of sites/possibly clients have charset="CHARSET", for example charset="utf-8". Or "utf8" instead of "utf-8"
      * This is not according to standard, but this method provide an ability to catch desired mistakes manually in code
      *
-     * @return the charset string from message's Content-Type header or {@code null} if charset is not presented
+     * @param message entity to fetch Content-Type header from
+     * @return the {@code CharSequence} with charset from message's Content-Type header
+     * or {@code null} if charset is not presented
+     * @deprecated use {@link #getCharsetAsSequence(HttpMessage)}
      */
+    @Deprecated
     public static CharSequence getCharsetAsString(HttpMessage message) {
+        return getCharsetAsSequence(message);
+    }
+
+    /**
+     * Fetch charset from message's Content-Type header as a char sequence.
+     *
+     * A lot of sites/possibly clients have charset="CHARSET", for example charset="utf-8". Or "utf8" instead of "utf-8"
+     * This is not according to standard, but this method provide an ability to catch desired mistakes manually in code
+     *
+     * @return the {@code CharSequence} with charset from message's Content-Type header
+     * or {@code null} if charset is not presented
+     */
+    public static CharSequence getCharsetAsSequence(HttpMessage message) {
         CharSequence contentTypeValue = message.headers().get(HttpHeaderNames.CONTENT_TYPE);
         if (contentTypeValue != null) {
-            int indexOfCharset = AsciiString.indexOfIgnoreCaseAscii(contentTypeValue, CHARSET_EQUALS, 0);
-            if (indexOfCharset != AsciiString.INDEX_NOT_FOUND) {
-                int indexOfEncoding = indexOfCharset + CHARSET_EQUALS.length();
-                if (indexOfEncoding < contentTypeValue.length()) {
-                    return contentTypeValue.subSequence(indexOfEncoding, contentTypeValue.length());
-                }
+            return getCharsetAsSequence(contentTypeValue);
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Fetch charset from Content-Type header value as a char sequence.
+     *
+     * A lot of sites/possibly clients have charset="CHARSET", for example charset="utf-8". Or "utf8" instead of "utf-8"
+     * This is not according to standard, but this method provide an ability to catch desired mistakes manually in code
+     *
+     * @param contentTypeValue Content-Type header value to parse
+     * @return the {@code CharSequence} with charset from message's Content-Type header
+     * or {@code null} if charset is not presented
+     * @throws NullPointerException in case if {@code contentTypeValue == null}
+     */
+    public static CharSequence getCharsetAsSequence(CharSequence contentTypeValue) {
+        if (contentTypeValue == null) {
+            throw new NullPointerException("contentTypeValue");
+        }
+        int indexOfCharset = AsciiString.indexOfIgnoreCaseAscii(contentTypeValue, CHARSET_EQUALS, 0);
+        if (indexOfCharset != AsciiString.INDEX_NOT_FOUND) {
+            int indexOfEncoding = indexOfCharset + CHARSET_EQUALS.length();
+            if (indexOfEncoding < contentTypeValue.length()) {
+                return contentTypeValue.subSequence(indexOfEncoding, contentTypeValue.length());
             }
         }
         return null;
     }
 
-    static void encodeAscii0(CharSequence seq, ByteBuf buf) {
-        int length = seq.length();
-        for (int i = 0 ; i < length; i++) {
-            buf.writeByte(c2b(seq.charAt(i)));
+    /**
+     * Fetch MIME type part from message's Content-Type header as a char sequence.
+     *
+     * @param message entity to fetch Content-Type header from
+     * @return the MIME type as a {@code CharSequence} from message's Content-Type header
+     * or {@code null} if content-type header or MIME type part of this header are not presented
+     * <p/>
+     * "content-type: text/html; charset=utf-8" - "text/html" will be returned <br/>
+     * "content-type: text/html" - "text/html" will be returned <br/>
+     * "content-type: " or no header - {@code null} we be returned
+     */
+    public static CharSequence getMimeType(HttpMessage message) {
+        CharSequence contentTypeValue = message.headers().get(HttpHeaderNames.CONTENT_TYPE);
+        if (contentTypeValue != null) {
+            return getMimeType(contentTypeValue);
+        } else {
+            return null;
         }
     }
 
-    private static byte c2b(char c) {
-        return c > 255 ? (byte) '?' : (byte) c;
+    /**
+     * Fetch MIME type part from Content-Type header value as a char sequence.
+     *
+     * @param contentTypeValue Content-Type header value to parse
+     * @return the MIME type as a {@code CharSequence} from message's Content-Type header
+     * or {@code null} if content-type header or MIME type part of this header are not presented
+     * <p/>
+     * "content-type: text/html; charset=utf-8" - "text/html" will be returned <br/>
+     * "content-type: text/html" - "text/html" will be returned <br/>
+     * "content-type: empty header - {@code null} we be returned
+     * @throws NullPointerException in case if {@code contentTypeValue == null}
+     */
+    public static CharSequence getMimeType(CharSequence contentTypeValue) {
+        if (contentTypeValue == null) {
+            throw new NullPointerException("contentTypeValue");
+        }
+
+        int indexOfSemicolon = AsciiString.indexOfIgnoreCaseAscii(contentTypeValue, SEMICOLON, 0);
+        if (indexOfSemicolon != AsciiString.INDEX_NOT_FOUND) {
+            return contentTypeValue.subSequence(0, indexOfSemicolon);
+        } else {
+            return contentTypeValue.length() > 0 ? contentTypeValue : null;
+        }
     }
 }

@@ -22,19 +22,19 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.internal.EmptyArrays;
-import io.netty.util.internal.ThreadLocalRandom;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Random;
 
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
 
 public abstract class AbstractIntegrationTest {
 
-    protected static final ThreadLocalRandom rand = ThreadLocalRandom.current();
+    protected static final Random rand = new Random();
 
     protected EmbeddedChannel encoder;
     protected EmbeddedChannel decoder;
@@ -150,8 +150,7 @@ public abstract class AbstractIntegrationTest {
         final CompositeByteBuf compressed = Unpooled.compositeBuffer();
         ByteBuf msg;
         while ((msg = encoder.readOutbound()) != null) {
-            compressed.addComponent(msg);
-            compressed.writerIndex(compressed.writerIndex() + msg.readableBytes());
+            compressed.addComponent(true, msg);
         }
         assertThat(compressed, is(notNullValue()));
 
@@ -159,8 +158,7 @@ public abstract class AbstractIntegrationTest {
         assertFalse(compressed.isReadable());
         final CompositeByteBuf decompressed = Unpooled.compositeBuffer();
         while ((msg = decoder.readInbound()) != null) {
-            decompressed.addComponent(msg);
-            decompressed.writerIndex(decompressed.writerIndex() + msg.readableBytes());
+            decompressed.addComponent(true, msg);
         }
         assertEquals(in.resetReaderIndex(), decompressed);
 

@@ -17,7 +17,6 @@ package io.netty.channel.pool;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelException;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.local.LocalAddress;
@@ -25,12 +24,14 @@ import io.netty.channel.local.LocalChannel;
 import io.netty.channel.local.LocalEventLoopGroup;
 import org.junit.Test;
 
+import java.net.ConnectException;
+
 import static org.junit.Assert.*;
 
 public class AbstractChannelPoolMapTest {
     private static final String LOCAL_ADDR_ID = "test.id";
 
-    @Test(expected = ChannelException.class)
+    @Test(expected = ConnectException.class)
     public void testMap() throws Exception {
         EventLoopGroup group = new LocalEventLoopGroup();
         LocalAddress addr = new LocalAddress(LOCAL_ADDR_ID);

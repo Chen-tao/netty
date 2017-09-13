@@ -30,8 +30,10 @@ import io.netty.channel.nio.AbstractNioMessageChannel;
 import io.netty.channel.socket.DatagramChannelConfig;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.InternetProtocolFamily;
+import io.netty.util.internal.SocketUtils;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.UnstableApi;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -188,14 +190,22 @@ public final class NioDatagramChannel
 
     @Override
     protected void doBind(SocketAddress localAddress) throws Exception {
-        javaChannel().socket().bind(localAddress);
+        doBind0(localAddress);
+    }
+
+    private void doBind0(SocketAddress localAddress) throws Exception {
+        if (PlatformDependent.javaVersion() >= 7) {
+            SocketUtils.bind(javaChannel(), localAddress);
+        } else {
+            javaChannel().socket().bind(localAddress);
+        }
     }
 
     @Override
     protected boolean doConnect(SocketAddress remoteAddress,
             SocketAddress localAddress) throws Exception {
         if (localAddress != null) {
-            javaChannel().socket().bind(localAddress);
+            doBind0(localAddress);
         }
 
         boolean success = false;
@@ -223,6 +233,16 @@ public final class NioDatagramChannel
     @Override
     protected void doClose() throws Exception {
         javaChannel().close();
+    }
+
+    @UnstableApi
+    @Override
+    protected void doShutdownOutput(Throwable cause) throws Exception {
+        // UDP sockets are not connected. A write failure may just be temporary or doDisconnect() was called.
+        ChannelOutboundBuffer channelOutboundBuffer = unsafe().outboundBuffer();
+        if (channelOutboundBuffer != null) {
+            channelOutboundBuffer.remove(cause);
+        }
     }
 
     @Override
@@ -579,7 +599,22 @@ public final class NioDatagramChannel
     }
 
     @Override
+    @Deprecated
     protected void setReadPending(boolean readPending) {
         super.setReadPending(readPending);
+    }
+
+    void clearReadPending0() {
+        clearReadPending();
+    }
+
+    @Override
+    protected boolean closeOnReadError(Throwable cause) {
+        // We do not want to close on SocketException when using DatagramChannel as we usually can continue receiving.
+        // See https://github.com/netty/netty/issues/5893
+        if (cause instanceof SocketException) {
+            return false;
+        }
+        return super.closeOnReadError(cause);
     }
 }

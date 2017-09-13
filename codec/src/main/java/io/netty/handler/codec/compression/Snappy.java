@@ -21,9 +21,9 @@ import io.netty.buffer.ByteBuf;
  * Uncompresses an input {@link ByteBuf} encoded with Snappy compression into an
  * output {@link ByteBuf}.
  *
- * See http://code.google.com/p/snappy/source/browse/trunk/format_description.txt
+ * See <a href="https://github.com/google/snappy/blob/master/format_description.txt">snappy format</a>.
  */
-class Snappy {
+public final class Snappy {
 
     private static final int MAX_HT_SIZE = 1 << 14;
     private static final int MIN_COMPRESSIBLE_BYTES = 15;
@@ -72,7 +72,7 @@ class Snappy {
         final int baseIndex = inIndex;
 
         final short[] table = getHashTable(length);
-        final int shift = 32 - (int) Math.floor(Math.log(table.length) / Math.log(2));
+        final int shift = Integer.numberOfLeadingZeros(table.length) + 1;
 
         int nextEmit = inIndex;
 
@@ -148,7 +148,7 @@ class Snappy {
      * @return A 32-bit hash of 4 bytes located at index
      */
     private static int hash(ByteBuf in, int index, int shift) {
-        return in.getInt(index) + 0x1e35a7bd >>> shift;
+        return in.getInt(index) * 0x1e35a7bd >>> shift;
     }
 
     /**
@@ -162,15 +162,7 @@ class Snappy {
         while (htSize < MAX_HT_SIZE && htSize < inputSize) {
             htSize <<= 1;
         }
-
-        short[] table;
-        if (htSize <= 256) {
-            table = new short[256];
-        } else {
-            table = new short[MAX_HT_SIZE];
-        }
-
-        return table;
+        return new short[htSize];
     }
 
     /**
@@ -280,6 +272,7 @@ class Snappy {
             switch (state) {
             case READY:
                 state = State.READING_PREAMBLE;
+                // fall through
             case READING_PREAMBLE:
                 int uncompressedLength = readPreamble(in);
                 if (uncompressedLength == PREAMBLE_NOT_FULL) {
@@ -293,6 +286,7 @@ class Snappy {
                 }
                 out.ensureWritable(uncompressedLength);
                 state = State.READING_TAG;
+                // fall through
             case READING_TAG:
                 if (!in.isReadable()) {
                     return;
@@ -598,7 +592,7 @@ class Snappy {
      *
      * @param data The input data to calculate the CRC32C checksum of
      */
-    public static int calculateChecksum(ByteBuf data) {
+    static int calculateChecksum(ByteBuf data) {
         return calculateChecksum(data, data.readerIndex(), data.readableBytes());
     }
 
@@ -608,17 +602,10 @@ class Snappy {
      *
      * @param data The input data to calculate the CRC32C checksum of
      */
-    public static int calculateChecksum(ByteBuf data, int offset, int length) {
+    static int calculateChecksum(ByteBuf data, int offset, int length) {
         Crc32c crc32 = new Crc32c();
         try {
-            if (data.hasArray()) {
-                crc32.update(data.array(), data.arrayOffset() + offset, length);
-            } else {
-                byte[] array = new byte[length];
-                data.getBytes(offset, array);
-                crc32.update(array, 0, length);
-            }
-
+            crc32.update(data, offset, length);
             return maskChecksum((int) crc32.getValue());
         } finally {
             crc32.reset();

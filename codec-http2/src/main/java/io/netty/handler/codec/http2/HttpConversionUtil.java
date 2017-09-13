@@ -14,8 +14,10 @@
  */
 package io.netty.handler.codec.http2;
 
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.FullHttpMessage;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -30,6 +32,7 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.AsciiString;
+import io.netty.util.internal.UnstableApi;
 
 import java.net.URI;
 import java.util.Iterator;
@@ -51,6 +54,7 @@ import static io.netty.util.internal.StringUtil.length;
 /**
  * Provides utility methods and constants for the HTTP/2 to HTTP conversion
  */
+@UnstableApi
 public final class HttpConversionUtil {
     /**
      * The set of headers that should not be directly copied when converting headers from HTTP to HTTP/2.
@@ -95,7 +99,7 @@ public final class HttpConversionUtil {
      * <a href="https://tools.ietf.org/html/rfc7540#section-8.1.2.3">rfc7540, 8.1.2.3</a> states the path must not
      * be empty, and instead should be {@code /}.
      */
-    private static final AsciiString EMPTY_REQUEST_PATH = new AsciiString("/");
+    private static final AsciiString EMPTY_REQUEST_PATH = AsciiString.cached("/");
 
     private HttpConversionUtil() {
     }
@@ -150,7 +154,7 @@ public final class HttpConversionUtil {
         private final AsciiString text;
 
         ExtensionHeaderNames(String text) {
-            this.text = new AsciiString(text);
+            this.text = AsciiString.cached(text);
         }
 
         public AsciiString text() {
@@ -186,6 +190,7 @@ public final class HttpConversionUtil {
      *
      * @param streamId The stream associated with the response
      * @param http2Headers The initial set of HTTP/2 headers to create the response with
+     * @param alloc The {@link ByteBufAllocator} to use to generate the content of the message
      * @param validateHttpHeaders <ul>
      *        <li>{@code true} to validate HTTP headers in the http-codec</li>
      *        <li>{@code false} not to validate HTTP headers in the http-codec</li>
@@ -193,13 +198,23 @@ public final class HttpConversionUtil {
      * @return A new response object which represents headers/data
      * @throws Http2Exception see {@link #addHttp2ToHttpHeaders(int, Http2Headers, FullHttpMessage, boolean)}
      */
-    public static FullHttpResponse toHttpResponse(int streamId, Http2Headers http2Headers, boolean validateHttpHeaders)
+    public static FullHttpResponse toHttpResponse(int streamId, Http2Headers http2Headers, ByteBufAllocator alloc,
+                                                  boolean validateHttpHeaders)
                     throws Http2Exception {
         HttpResponseStatus status = parseStatus(http2Headers.status());
         // HTTP/2 does not define a way to carry the version or reason phrase that is included in an
         // HTTP/1.1 status line.
-        FullHttpResponse msg = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, validateHttpHeaders);
-        addHttp2ToHttpHeaders(streamId, http2Headers, msg, false);
+        FullHttpResponse msg = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, alloc.buffer(),
+                                                           validateHttpHeaders);
+        try {
+            addHttp2ToHttpHeaders(streamId, http2Headers, msg, false);
+        } catch (Http2Exception e) {
+            msg.release();
+            throw e;
+        } catch (Throwable t) {
+            msg.release();
+            throw streamError(streamId, PROTOCOL_ERROR, t, "HTTP/2 to HTTP/1.x headers conversion error");
+        }
         return msg;
     }
 
@@ -208,6 +223,7 @@ public final class HttpConversionUtil {
      *
      * @param streamId The stream associated with the request
      * @param http2Headers The initial set of HTTP/2 headers to create the request with
+     * @param alloc The {@link ByteBufAllocator} to use to generate the content of the message
      * @param validateHttpHeaders <ul>
      *        <li>{@code true} to validate HTTP headers in the http-codec</li>
      *        <li>{@code false} not to validate HTTP headers in the http-codec</li>
@@ -215,7 +231,8 @@ public final class HttpConversionUtil {
      * @return A new request object which represents headers/data
      * @throws Http2Exception see {@link #addHttp2ToHttpHeaders(int, Http2Headers, FullHttpMessage, boolean)}
      */
-    public static FullHttpRequest toHttpRequest(int streamId, Http2Headers http2Headers, boolean validateHttpHeaders)
+    public static FullHttpRequest toFullHttpRequest(int streamId, Http2Headers http2Headers, ByteBufAllocator alloc,
+                                                boolean validateHttpHeaders)
                     throws Http2Exception {
         // HTTP/2 does not define a way to carry the version identifier that is included in the HTTP/1.1 request line.
         final CharSequence method = checkNotNull(http2Headers.method(),
@@ -223,8 +240,47 @@ public final class HttpConversionUtil {
         final CharSequence path = checkNotNull(http2Headers.path(),
                 "path header cannot be null in conversion to HTTP/1.x");
         FullHttpRequest msg = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.valueOf(method
-                        .toString()), path.toString(), validateHttpHeaders);
-        addHttp2ToHttpHeaders(streamId, http2Headers, msg, false);
+                        .toString()), path.toString(), alloc.buffer(), validateHttpHeaders);
+        try {
+            addHttp2ToHttpHeaders(streamId, http2Headers, msg, false);
+        } catch (Http2Exception e) {
+            msg.release();
+            throw e;
+        } catch (Throwable t) {
+            msg.release();
+            throw streamError(streamId, PROTOCOL_ERROR, t, "HTTP/2 to HTTP/1.x headers conversion error");
+        }
+        return msg;
+    }
+
+    /**
+     * Create a new object to contain the request data.
+     *
+     * @param streamId The stream associated with the request
+     * @param http2Headers The initial set of HTTP/2 headers to create the request with
+     * @param validateHttpHeaders <ul>
+     *        <li>{@code true} to validate HTTP headers in the http-codec</li>
+     *        <li>{@code false} not to validate HTTP headers in the http-codec</li>
+     *        </ul>
+     * @return A new request object which represents headers for a chunked request
+     * @throws Http2Exception see {@link #addHttp2ToHttpHeaders(int, Http2Headers, FullHttpMessage, boolean)}
+     */
+    public static HttpRequest toHttpRequest(int streamId, Http2Headers http2Headers, boolean validateHttpHeaders)
+                    throws Http2Exception {
+        // HTTP/2 does not define a way to carry the version identifier that is included in the HTTP/1.1 request line.
+        final CharSequence method = checkNotNull(http2Headers.method(),
+                "method header cannot be null in conversion to HTTP/1.x");
+        final CharSequence path = checkNotNull(http2Headers.path(),
+                "path header cannot be null in conversion to HTTP/1.x");
+        HttpRequest msg = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.valueOf(method.toString()),
+                path.toString(), validateHttpHeaders);
+        try {
+            addHttp2ToHttpHeaders(streamId, http2Headers, msg.headers(), msg.protocolVersion(), false, true);
+        } catch (Http2Exception e) {
+            throw e;
+        } catch (Throwable t) {
+            throw streamError(streamId, PROTOCOL_ERROR, t, "HTTP/2 to HTTP/1.x headers conversion error");
+        }
         return msg;
     }
 
@@ -284,7 +340,6 @@ public final class HttpConversionUtil {
      * The following headers are only used if they can not be found in from the {@code HOST} header or the
      * {@code Request-Line} as defined by <a href="https://tools.ietf.org/html/rfc7230">rfc7230</a>
      * <ul>
-     * <li>{@link ExtensionHeaderNames#AUTHORITY}</li>
      * <li>{@link ExtensionHeaderNames#SCHEME}</li>
      * </ul>
      * {@link ExtensionHeaderNames#PATH} is ignored and instead extracted from the {@code Request-Line}.
@@ -306,7 +361,7 @@ public final class HttpConversionUtil {
             }
         } else if (in instanceof HttpResponse) {
             HttpResponse response = (HttpResponse) in;
-            out.status(new AsciiString(Integer.toString(response.status().code())));
+            out.status(response.status().codeAsText());
         }
 
         // Add the HTTP headers which have not been consumed above
@@ -391,16 +446,19 @@ public final class HttpConversionUtil {
         return path.isEmpty() ? EMPTY_REQUEST_PATH : new AsciiString(path);
     }
 
-    private static void setHttp2Authority(String autority, Http2Headers out) {
+    // package-private for testing only
+    static void setHttp2Authority(String authority, Http2Headers out) {
         // The authority MUST NOT include the deprecated "userinfo" subcomponent
-        if (autority != null) {
-            int endOfUserInfo = autority.indexOf('@');
-            if (endOfUserInfo < 0) {
-                out.authority(new AsciiString(autority));
-            } else if (endOfUserInfo + 1 < autority.length()) {
-                out.authority(new AsciiString(autority.substring(endOfUserInfo + 1)));
+        if (authority != null) {
+            if (authority.isEmpty()) {
+                out.authority(EMPTY_STRING);
             } else {
-                throw new IllegalArgumentException("autority: " + autority);
+                int start = authority.indexOf('@') + 1;
+                int length = authority.length() - start;
+                if (length == 0) {
+                    throw new IllegalArgumentException("authority: " + authority);
+                }
+                out.authority(new AsciiString(authority, start, length));
             }
         }
     }

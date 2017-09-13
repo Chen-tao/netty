@@ -15,8 +15,14 @@
  */
 package io.netty.channel;
 
+import io.netty.util.concurrent.RejectedExecutionHandler;
+import io.netty.util.concurrent.RejectedExecutionHandlers;
 import io.netty.util.concurrent.SingleThreadEventExecutor;
+import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.SystemPropertyUtil;
+import io.netty.util.internal.UnstableApi;
 
+import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 
@@ -26,14 +32,31 @@ import java.util.concurrent.ThreadFactory;
  */
 public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor implements EventLoop {
 
-    private final ChannelHandlerInvoker invoker = new DefaultChannelHandlerInvoker(this);
+    protected static final int DEFAULT_MAX_PENDING_TASKS = Math.max(16,
+            SystemPropertyUtil.getInt("io.netty.eventLoop.maxPendingTasks", Integer.MAX_VALUE));
+
+    private final Queue<Runnable> tailTasks;
 
     protected SingleThreadEventLoop(EventLoopGroup parent, ThreadFactory threadFactory, boolean addTaskWakesUp) {
-        super(parent, threadFactory, addTaskWakesUp);
+        this(parent, threadFactory, addTaskWakesUp, DEFAULT_MAX_PENDING_TASKS, RejectedExecutionHandlers.reject());
     }
 
     protected SingleThreadEventLoop(EventLoopGroup parent, Executor executor, boolean addTaskWakesUp) {
-        super(parent, executor, addTaskWakesUp);
+        this(parent, executor, addTaskWakesUp, DEFAULT_MAX_PENDING_TASKS, RejectedExecutionHandlers.reject());
+    }
+
+    protected SingleThreadEventLoop(EventLoopGroup parent, ThreadFactory threadFactory,
+                                    boolean addTaskWakesUp, int maxPendingTasks,
+                                    RejectedExecutionHandler rejectedExecutionHandler) {
+        super(parent, threadFactory, addTaskWakesUp, maxPendingTasks, rejectedExecutionHandler);
+        tailTasks = newTaskQueue(maxPendingTasks);
+    }
+
+    protected SingleThreadEventLoop(EventLoopGroup parent, Executor executor,
+                                    boolean addTaskWakesUp, int maxPendingTasks,
+                                    RejectedExecutionHandler rejectedExecutionHandler) {
+        super(parent, executor, addTaskWakesUp, maxPendingTasks, rejectedExecutionHandler);
+        tailTasks = newTaskQueue(maxPendingTasks);
     }
 
     @Override
@@ -47,15 +70,18 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
     }
 
     @Override
-    public ChannelHandlerInvoker asInvoker() {
-        return invoker;
+    public ChannelFuture register(Channel channel) {
+        return register(new DefaultChannelPromise(channel, this));
     }
 
     @Override
-    public ChannelFuture register(Channel channel) {
-        return register(channel, new DefaultChannelPromise(channel, this));
+    public ChannelFuture register(final ChannelPromise promise) {
+        ObjectUtil.checkNotNull(promise, "promise");
+        promise.channel().unsafe().register(this, promise);
+        return promise;
     }
 
+    @Deprecated
     @Override
     public ChannelFuture register(final Channel channel, final ChannelPromise promise) {
         if (channel == null) {
@@ -69,9 +95,57 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
         return promise;
     }
 
+    /**
+     * Adds a task to be run once at the end of next (or current) {@code eventloop} iteration.
+     *
+     * @param task to be added.
+     */
+    @UnstableApi
+    public final void executeAfterEventLoopIteration(Runnable task) {
+        ObjectUtil.checkNotNull(task, "task");
+        if (isShutdown()) {
+            reject();
+        }
+
+        if (!tailTasks.offer(task)) {
+            reject(task);
+        }
+
+        if (wakesUpForTask(task)) {
+            wakeup(inEventLoop());
+        }
+    }
+
+    /**
+     * Removes a task that was added previously via {@link #executeAfterEventLoopIteration(Runnable)}.
+     *
+     * @param task to be removed.
+     *
+     * @return {@code true} if the task was removed as a result of this call.
+     */
+    @UnstableApi
+    final boolean removeAfterEventLoopIterationTask(Runnable task) {
+        return tailTasks.remove(ObjectUtil.checkNotNull(task, "task"));
+    }
+
     @Override
     protected boolean wakesUpForTask(Runnable task) {
         return !(task instanceof NonWakeupRunnable);
+    }
+
+    @Override
+    protected void afterRunningAllTasks() {
+        runAllTasksFrom(tailTasks);
+    }
+
+    @Override
+    protected boolean hasTasks() {
+        return super.hasTasks() || !tailTasks.isEmpty();
+    }
+
+    @Override
+    public int pendingTasks() {
+        return super.pendingTasks() + tailTasks.size();
     }
 
     /**

@@ -16,6 +16,7 @@
 package io.netty.handler.codec.http;
 
 import io.netty.handler.codec.CharSequenceValueConverter;
+import io.netty.handler.codec.DateFormatter;
 import io.netty.handler.codec.DefaultHeaders;
 import io.netty.handler.codec.DefaultHeaders.NameValidator;
 import io.netty.handler.codec.DefaultHeadersImpl;
@@ -53,6 +54,9 @@ public class DefaultHttpHeaders extends HttpHeaders {
     static final NameValidator<CharSequence> HttpNameValidator = new NameValidator<CharSequence>() {
         @Override
         public void validateName(CharSequence name) {
+            if (name == null || name.length() == 0) {
+                throw new IllegalArgumentException("empty headers are not allowed [" + name + "]");
+            }
             if (name instanceof AsciiString) {
                 try {
                     ((AsciiString) name).forEachByte(HEADER_NAME_VALIDATOR);
@@ -309,10 +313,8 @@ public class DefaultHttpHeaders extends HttpHeaders {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof DefaultHttpHeaders)) {
-            return false;
-        }
-        return headers.equals(((DefaultHttpHeaders) o).headers, CASE_SENSITIVE_HASHER);
+        return o instanceof DefaultHttpHeaders
+                && headers.equals(((DefaultHttpHeaders) o).headers, CASE_SENSITIVE_HASHER);
     }
 
     @Override
@@ -388,10 +390,10 @@ public class DefaultHttpHeaders extends HttpHeaders {
                 return (CharSequence) value;
             }
             if (value instanceof Date) {
-                return HttpHeaderDateFormat.get().format((Date) value);
+                return DateFormatter.format((Date) value);
             }
             if (value instanceof Calendar) {
-                return HttpHeaderDateFormat.get().format(((Calendar) value).getTime());
+                return DateFormatter.format(((Calendar) value).getTime());
             }
             return value.toString();
         }

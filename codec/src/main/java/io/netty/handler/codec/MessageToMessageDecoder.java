@@ -21,7 +21,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.ReferenceCounted;
-import io.netty.util.internal.RecyclableArrayList;
 import io.netty.util.internal.TypeParameterMatcher;
 
 import java.util.List;
@@ -80,7 +79,7 @@ public abstract class MessageToMessageDecoder<I> extends ChannelInboundHandlerAd
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        RecyclableArrayList out = RecyclableArrayList.newInstance();
+        CodecOutputList out = CodecOutputList.newInstance();
         try {
             if (acceptInboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
@@ -100,7 +99,7 @@ public abstract class MessageToMessageDecoder<I> extends ChannelInboundHandlerAd
         } finally {
             int size = out.size();
             for (int i = 0; i < size; i ++) {
-                ctx.fireChannelRead(out.get(i));
+                ctx.fireChannelRead(out.getUnsafe(i));
             }
             out.recycle();
         }
@@ -113,7 +112,7 @@ public abstract class MessageToMessageDecoder<I> extends ChannelInboundHandlerAd
      * @param ctx           the {@link ChannelHandlerContext} which this {@link MessageToMessageDecoder} belongs to
      * @param msg           the message to decode to an other one
      * @param out           the {@link List} to which decoded messages should be added
-     * @throws Exception    is thrown if an error accour
+     * @throws Exception    is thrown if an error occurs
      */
     protected abstract void decode(ChannelHandlerContext ctx, I msg, List<Object> out) throws Exception;
 }

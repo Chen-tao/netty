@@ -19,6 +19,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.experimental.theories.DataPoints;
@@ -28,7 +29,8 @@ import org.junit.experimental.theories.Theory;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Theories.class)
 public abstract class AbstractDecoderTest extends AbstractCompressionTest {
@@ -61,6 +63,14 @@ public abstract class AbstractDecoderTest extends AbstractCompressionTest {
 
     @Before
     public abstract void initChannel();
+
+    @After
+    public void destroyChannel() {
+        if (channel != null) {
+            channel.finishAndReleaseAll();
+            channel = null;
+        }
+    }
 
     @DataPoints("smallData")
     public static ByteBuf[] smallData() {
@@ -106,8 +116,8 @@ public abstract class AbstractDecoderTest extends AbstractCompressionTest {
         final int compressedLength = data.readableBytes();
         int written = 0, length = rand.nextInt(100);
         while (written + length < compressedLength) {
-            ByteBuf compressedBuf = data.slice(written, length);
-            channel.writeInbound(compressedBuf.retain());
+            ByteBuf compressedBuf = data.retainedSlice(written, length);
+            channel.writeInbound(compressedBuf);
             written += length;
             length = rand.nextInt(100);
         }
@@ -125,8 +135,7 @@ public abstract class AbstractDecoderTest extends AbstractCompressionTest {
         CompositeByteBuf decompressed = Unpooled.compositeBuffer();
         ByteBuf msg;
         while ((msg = channel.readInbound()) != null) {
-            decompressed.addComponent(msg);
-            decompressed.writerIndex(decompressed.writerIndex() + msg.readableBytes());
+            decompressed.addComponent(true, msg);
         }
         return decompressed;
     }

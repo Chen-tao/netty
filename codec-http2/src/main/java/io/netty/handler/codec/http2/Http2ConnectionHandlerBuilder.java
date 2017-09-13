@@ -17,10 +17,12 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.handler.codec.http2.Http2HeadersEncoder.SensitivityDetector;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Builder which builds {@link Http2ConnectionHandler} objects.
  */
+@UnstableApi
 public final class Http2ConnectionHandlerBuilder
         extends AbstractHttp2ConnectionHandlerBuilder<Http2ConnectionHandler, Http2ConnectionHandlerBuilder> {
 
@@ -55,6 +57,11 @@ public final class Http2ConnectionHandlerBuilder
     }
 
     @Override
+    public Http2ConnectionHandlerBuilder maxReservedStreams(int maxReservedStreams) {
+        return super.maxReservedStreams(maxReservedStreams);
+    }
+
+    @Override
     public Http2ConnectionHandlerBuilder codec(Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder) {
         return super.codec(decoder, encoder);
     }
@@ -71,8 +78,18 @@ public final class Http2ConnectionHandlerBuilder
     }
 
     @Override
+    public Http2ConnectionHandlerBuilder encoderIgnoreMaxHeaderListSize(boolean encoderIgnoreMaxHeaderListSize) {
+        return super.encoderIgnoreMaxHeaderListSize(encoderIgnoreMaxHeaderListSize);
+    }
+
+    @Override
     public Http2ConnectionHandlerBuilder headerSensitivityDetector(SensitivityDetector headerSensitivityDetector) {
         return super.headerSensitivityDetector(headerSensitivityDetector);
+    }
+
+    @Override
+    public Http2ConnectionHandlerBuilder initialHuffmanDecodeCapacity(int initialHuffmanDecodeCapacity) {
+        return super.initialHuffmanDecodeCapacity(initialHuffmanDecodeCapacity);
     }
 
     @Override

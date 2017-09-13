@@ -52,7 +52,7 @@ public class ChannelOutboundBufferTest {
         assertEquals(0, buffer.nioBufferCount());
 
         ByteBuf buf = copiedBuffer("buf1", CharsetUtil.US_ASCII);
-        ByteBuffer nioBuf = buf.internalNioBuffer(0, buf.readableBytes());
+        ByteBuffer nioBuf = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes());
         buffer.addMessage(buf, buf.readableBytes(), channel.voidPromise());
         assertEquals("Should still be 0 as not flushed yet", 0, buffer.nioBufferCount());
         buffer.addFlush();
@@ -84,7 +84,7 @@ public class ChannelOutboundBufferTest {
         ByteBuffer[] buffers = buffer.nioBuffers();
         assertEquals(64, buffer.nioBufferCount());
         for (int i = 0;  i < buffer.nioBufferCount(); i++) {
-            assertEquals(buffers[i], buf.internalNioBuffer(0, buf.readableBytes()));
+            assertEquals(buffers[i], buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes()));
         }
         release(buffer);
         buf.release();
@@ -99,7 +99,7 @@ public class ChannelOutboundBufferTest {
         CompositeByteBuf comp = compositeBuffer(256);
         ByteBuf buf = directBuffer().writeBytes("buf1".getBytes(CharsetUtil.US_ASCII));
         for (int i = 0; i < 65; i++) {
-            comp.addComponent(buf.copy()).writerIndex(comp.writerIndex() + buf.readableBytes());
+            comp.addComponent(true, buf.copy());
         }
         buffer.addMessage(comp, comp.readableBytes(), channel.voidPromise());
 
@@ -109,7 +109,7 @@ public class ChannelOutboundBufferTest {
         assertEquals(65, buffer.nioBufferCount());
         for (int i = 0;  i < buffer.nioBufferCount(); i++) {
             if (i < 65) {
-                assertEquals(buffers[i], buf.internalNioBuffer(0, buf.readableBytes()));
+                assertEquals(buffers[i], buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes()));
             } else {
                 assertNull(buffers[i]);
             }
@@ -218,22 +218,25 @@ public class ChannelOutboundBufferTest {
             }
         });
 
-        ch.config().setWriteBufferLowWaterMark(128);
-        ch.config().setWriteBufferHighWaterMark(256);
+        ch.config().setWriteBufferLowWaterMark(128 + ChannelOutboundBuffer.CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD);
+        ch.config().setWriteBufferHighWaterMark(256 + ChannelOutboundBuffer.CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD);
 
-        // Ensure exceeding the low watermark does not make channel unwritable.
         ch.write(buffer().writeZero(128));
+        // Ensure exceeding the low watermark does not make channel unwritable.
+        ch.write(buffer().writeZero(2));
         assertThat(buf.toString(), is(""));
 
         ch.unsafe().outboundBuffer().addFlush();
 
         // Ensure exceeding the high watermark makes channel unwritable.
-        ch.write(buffer().writeZero(128));
+        ch.write(buffer().writeZero(127));
         assertThat(buf.toString(), is("false "));
 
         // Ensure going down to the low watermark makes channel writable again by flushing the first write.
         assertThat(ch.unsafe().outboundBuffer().remove(), is(true));
-        assertThat(ch.unsafe().outboundBuffer().totalPendingWriteBytes(), is(128L));
+        assertThat(ch.unsafe().outboundBuffer().remove(), is(true));
+        assertThat(ch.unsafe().outboundBuffer().totalPendingWriteBytes(),
+                is(127L + ChannelOutboundBuffer.CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD));
         assertThat(buf.toString(), is("false true "));
 
         safeClose(ch);
@@ -330,7 +333,7 @@ public class ChannelOutboundBufferTest {
         ChannelOutboundBuffer cob = ch.unsafe().outboundBuffer();
 
         // Trigger channelWritabilityChanged() by writing a lot.
-        ch.write(buffer().writeZero(256));
+        ch.write(buffer().writeZero(257));
         assertThat(buf.toString(), is("false "));
 
         // Ensure that setting a user-defined writability flag to false does not trigger channelWritabilityChanged()
@@ -338,7 +341,7 @@ public class ChannelOutboundBufferTest {
         ch.runPendingTasks();
         assertThat(buf.toString(), is("false "));
 
-        // Ensure reducing the totalPendingWriteBytes down to zero does not trigger channelWritabilityChannged()
+        // Ensure reducing the totalPendingWriteBytes down to zero does not trigger channelWritabilityChanged()
         // because of the user-defined writability flag.
         ch.flush();
         assertThat(cob.totalPendingWriteBytes(), is(0L));

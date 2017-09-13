@@ -15,7 +15,7 @@
 
 package io.netty.util.collection;
 
-import static io.netty.util.internal.MathUtil.findNextPositivePowerOfTwo;
+import static io.netty.util.internal.MathUtil.safeFindNextPositivePowerOfTwo;
 
 import java.util.AbstractCollection;
 import java.util.AbstractSet;
@@ -77,9 +77,6 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
     }
 
     public @K@ObjectHashMap(int initialCapacity, float loadFactor) {
-        if (initialCapacity < 1) {
-            throw new IllegalArgumentException("initialCapacity must be >= 1");
-        }
         if (loadFactor <= 0.0f || loadFactor > 1.0f) {
             // Cannot exceed 1 because we can never store more than capacity elements;
             // using a bigger loadFactor would trigger rehashing before the desired load is reached.
@@ -89,7 +86,7 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
         this.loadFactor = loadFactor;
 
         // Adjust the initial capacity if necessary.
-        int capacity = findNextPositivePowerOfTwo(initialCapacity);
+        int capacity = safeFindNextPositivePowerOfTwo(initialCapacity);
         mask = capacity - 1;
 
         // Allocate the arrays.
@@ -103,6 +100,7 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
     }
 
     private static <T> T toExternal(T value) {
+        assert value != null : "null is not a legitimate internal value. Concurrent Modification?";
         return value == NULL_VALUE ? null : value;
     }
 
@@ -143,10 +141,6 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
                 throw new IllegalStateException("Unable to insert");
             }
         }
-    }
-
-    private int probeNext(int index) {
-        return index == values.length - 1 ? 0 : index + 1;
     }
 
     @Override
@@ -367,6 +361,7 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
      * Returns the hashed index for the given key.
      */
     private int hashIndex(@k@ key) {
+        // The array lengths are always a power of two, so we can use a bitmask to stay inside the array bounds.
         return hashCode(key) & mask;
     }
 
@@ -375,6 +370,14 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
      */
     private static int hashCode(@k@ key) {
        return @HASH_CODE@;
+    }
+
+    /**
+     * Get the next sequential index after {@code index} and wraps if necessary.
+     */
+    private int probeNext(int index) {
+        // The array lengths are always a power of two, so we can use a bitmask to stay inside the array bounds.
+        return (index + 1) & mask;
     }
 
     /**
@@ -398,8 +401,9 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
      * if necessary to not break conflict chains.
      *
      * @param index the index position of the element to remove.
+     * @return {@code true} if the next item was moved back. {@code false} otherwise.
      */
-    private void removeAt(int index) {
+    private boolean removeAt(final int index) {
         --size;
         // Clearing the key is not strictly necessary (for GC like in a regular collection),
         // but recommended for security. The memory location is still fresh in the cache anyway.
@@ -412,19 +416,22 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
         // Knuth Section 6.4 Algorithm R, also used by the JDK's IdentityHashMap.
 
         int nextFree = index;
-        for (int i = probeNext(index); values[i] != null; i = probeNext(i)) {
-            int bucket = hashIndex(keys[i]);
+        int i = probeNext(index);
+        for (V value = values[i]; value != null; value = values[i = probeNext(i)]) {
+            @k@ key = keys[i];
+            int bucket = hashIndex(key);
             if (i < bucket && (bucket <= nextFree || nextFree <= i) ||
                 bucket <= nextFree && nextFree <= i) {
                 // Move the displaced entry "back" to the first available position.
-                keys[nextFree] = keys[i];
-                values[nextFree] = values[i];
+                keys[nextFree] = key;
+                values[nextFree] = value;
                 // Put the first entry after the displaced entry
                 keys[i] = 0;
                 values[i] = null;
                 nextFree = i;
             }
         }
+        return nextFree != index;
     }
 
     /**
@@ -590,10 +597,7 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
         private int entryIndex = -1;
 
         private void scanNext() {
-            for (;;) {
-                if (++nextIndex == values.length || values[nextIndex] != null) {
-                    break;
-                }
+            while (++nextIndex != values.length && values[nextIndex] == null) {
             }
         }
 
@@ -602,7 +606,7 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
             if (nextIndex == -1) {
                 scanNext();
             }
-            return nextIndex < keys.length;
+            return nextIndex != values.length;
         }
 
         @Override
@@ -621,10 +625,15 @@ public class @K@ObjectHashMap<V> implements @K@ObjectMap<V> {
 
         @Override
         public void remove() {
-            if (prevIndex < 0) {
+            if (prevIndex == -1) {
                 throw new IllegalStateException("next must be called before each remove.");
             }
-            removeAt(prevIndex);
+            if (removeAt(prevIndex)) {
+                // removeAt may move elements "back" in the array if they have been displaced because their spot in the
+                // array was occupied when they were inserted. If this occurs then the nextIndex is now invalid and
+                // should instead point to the prevIndex which now holds an element which was "moved back".
+                nextIndex = prevIndex;
+            }
             prevIndex = -1;
         }
 

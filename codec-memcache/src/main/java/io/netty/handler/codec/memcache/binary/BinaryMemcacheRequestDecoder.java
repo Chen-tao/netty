@@ -17,10 +17,12 @@ package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The decoder part which takes care of decoding the request-specific headers.
  */
+@UnstableApi
 public class BinaryMemcacheRequestDecoder
     extends AbstractBinaryMemcacheDecoder<BinaryMemcacheRequest> {
 
@@ -34,7 +36,7 @@ public class BinaryMemcacheRequestDecoder
 
     @Override
     protected BinaryMemcacheRequest decodeHeader(ByteBuf in) {
-        BinaryMemcacheRequest header = new DefaultBinaryMemcacheRequest();
+        DefaultBinaryMemcacheRequest header = new DefaultBinaryMemcacheRequest();
         header.setMagic(in.readByte());
         header.setOpcode(in.readByte());
         header.setKeyLength(in.readShort());
@@ -49,6 +51,6 @@ public class BinaryMemcacheRequestDecoder
 
     @Override
     protected BinaryMemcacheRequest buildInvalidMessage() {
-        return new DefaultBinaryMemcacheRequest("", Unpooled.EMPTY_BUFFER);
+        return new DefaultBinaryMemcacheRequest(Unpooled.EMPTY_BUFFER, Unpooled.EMPTY_BUFFER);
     }
 }

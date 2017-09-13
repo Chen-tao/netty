@@ -26,6 +26,7 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ReadOnlyBufferException;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 import java.nio.charset.Charset;
@@ -92,6 +93,16 @@ public final class EmptyByteBuf extends ByteBuf {
     @Override
     public ByteBuf unwrap() {
         return null;
+    }
+
+    @Override
+    public ByteBuf asReadOnly() {
+        return Unpooled.unmodifiableBuffer(this);
+    }
+
+    @Override
+    public boolean isReadOnly() {
+        return false;
     }
 
     @Override
@@ -375,6 +386,18 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public int getBytes(int index, FileChannel out, long position, int length) {
+        checkIndex(index, length);
+        return 0;
+    }
+
+    @Override
+    public CharSequence getCharSequence(int index, int length, Charset charset) {
+        checkIndex(index, length);
+        return null;
+    }
+
+    @Override
     public ByteBuf setBoolean(int index, boolean value) {
         throw new IndexOutOfBoundsException();
     }
@@ -482,8 +505,19 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public int setBytes(int index, FileChannel in, long position, int length) {
+        checkIndex(index, length);
+        return 0;
+    }
+
+    @Override
     public ByteBuf setZero(int index, int length) {
         return checkIndex(index, length);
+    }
+
+    @Override
+    public int setCharSequence(int index, CharSequence sequence, Charset charset) {
+        throw new IndexOutOfBoundsException();
     }
 
     @Override
@@ -597,6 +631,11 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf readRetainedSlice(int length) {
+        return checkLength(length);
+    }
+
+    @Override
     public ByteBuf readBytes(ByteBuf dst) {
         return checkLength(dst.writableBytes());
     }
@@ -635,6 +674,18 @@ public final class EmptyByteBuf extends ByteBuf {
     public int readBytes(GatheringByteChannel out, int length) {
         checkLength(length);
         return 0;
+    }
+
+    @Override
+    public int readBytes(FileChannel out, long position, int length) {
+        checkLength(length);
+        return 0;
+    }
+
+    @Override
+    public CharSequence readCharSequence(int length, Charset charset) {
+        checkLength(length);
+        return null;
     }
 
     @Override
@@ -709,7 +760,7 @@ public final class EmptyByteBuf extends ByteBuf {
 
     @Override
     public ByteBuf writeBytes(ByteBuf src) {
-        throw new IndexOutOfBoundsException();
+        return checkLength(src.readableBytes());
     }
 
     @Override
@@ -750,8 +801,19 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public int writeBytes(FileChannel in, long position, int length) {
+        checkLength(length);
+        return 0;
+    }
+
+    @Override
     public ByteBuf writeZero(int length) {
         return checkLength(length);
+    }
+
+    @Override
+    public int writeCharSequence(CharSequence sequence, Charset charset) {
+        throw new IndexOutOfBoundsException();
     }
 
     @Override
@@ -816,12 +878,27 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf retainedSlice() {
+        return this;
+    }
+
+    @Override
     public ByteBuf slice(int index, int length) {
         return checkIndex(index, length);
     }
 
     @Override
+    public ByteBuf retainedSlice(int index, int length) {
+        return checkIndex(index, length);
+    }
+
+    @Override
     public ByteBuf duplicate() {
+        return this;
+    }
+
+    @Override
+    public ByteBuf retainedDuplicate() {
         return this;
     }
 

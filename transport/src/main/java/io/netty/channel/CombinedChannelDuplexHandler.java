@@ -19,7 +19,7 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.internal.OneTimeTask;
+import io.netty.util.internal.ThrowableUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
@@ -45,12 +45,15 @@ public class CombinedChannelDuplexHandler<I extends ChannelInboundHandler, O ext
      * {@link #init(ChannelInboundHandler, ChannelOutboundHandler)} before adding this handler into a
      * {@link ChannelPipeline}.
      */
-    protected CombinedChannelDuplexHandler() { }
+    protected CombinedChannelDuplexHandler() {
+        ensureNotSharable();
+    }
 
     /**
      * Creates a new instance that combines the specified two handlers into one.
      */
     public CombinedChannelDuplexHandler(I inboundHandler, O outboundHandler) {
+        ensureNotSharable();
         init(inboundHandler, outboundHandler);
     }
 
@@ -143,10 +146,17 @@ public class CombinedChannelDuplexHandler<I extends ChannelInboundHandler, O ext
                         // as well
                         outboundHandler.exceptionCaught(outboundCtx, cause);
                     } catch (Throwable error) {
-                        if (logger.isWarnEnabled()) {
+                        if (logger.isDebugEnabled()) {
+                            logger.debug(
+                                    "An exception {}" +
+                                    "was thrown by a user handler's exceptionCaught() " +
+                                    "method while handling the following exception:",
+                                    ThrowableUtil.stackTraceToString(error), cause);
+                        } else if (logger.isWarnEnabled()) {
                             logger.warn(
-                                    "An exception was thrown by a user handler's " +
-                                            "exceptionCaught() method while handling the following exception:", error);
+                                    "An exception '{}' [enable DEBUG level for full stacktrace] " +
+                                    "was thrown by a user handler's exceptionCaught() " +
+                                    "method while handling the following exception:", error, cause);
                         }
                     }
                 } else {
@@ -373,11 +383,6 @@ public class CombinedChannelDuplexHandler<I extends ChannelInboundHandler, O ext
         }
 
         @Override
-        public ChannelHandlerInvoker invoker() {
-            return ctx.invoker();
-        }
-
-        @Override
         public String name() {
             return ctx.name();
         }
@@ -504,7 +509,7 @@ public class CombinedChannelDuplexHandler<I extends ChannelInboundHandler, O ext
 
         @Override
         public ChannelFuture deregister(ChannelPromise promise) {
-            return ctx.deregister();
+            return ctx.deregister(promise);
         }
 
         @Override
@@ -589,7 +594,7 @@ public class CombinedChannelDuplexHandler<I extends ChannelInboundHandler, O ext
             if (executor.inEventLoop()) {
                 remove0();
             } else {
-                executor.execute(new OneTimeTask() {
+                executor.execute(new Runnable() {
                     @Override
                     public void run() {
                         remove0();

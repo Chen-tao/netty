@@ -17,26 +17,19 @@ package io.netty.handler.ssl;
 
 interface OpenSslEngineMap {
 
-    OpenSslEngineMap EMPTY = new OpenSslEngineMap() {
-        @Override
-        public OpenSslEngine remove(long ssl) {
-            return null;
-        }
-
-        @Override
-        public void add(OpenSslEngine engine) {
-            // NOOP
-        }
-    };
-
     /**
      * Remove the {@link OpenSslEngine} with the given {@code ssl} address and
      * return it.
      */
-    OpenSslEngine remove(long ssl);
+    ReferenceCountedOpenSslEngine remove(long ssl);
 
     /**
      * Add a {@link OpenSslEngine} to this {@link OpenSslEngineMap}.
      */
-    void add(OpenSslEngine engine);
+    void add(ReferenceCountedOpenSslEngine engine);
+
+    /**
+     * Get the {@link OpenSslEngine} for the given {@code ssl} address.
+     */
+    ReferenceCountedOpenSslEngine get(long ssl);
 }

@@ -16,12 +16,16 @@
 package io.netty.handler.codec.dns;
 
 import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.UnstableApi;
+
+import java.net.IDN;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
  * A skeletal implementation of {@link DnsRecord}.
  */
+@UnstableApi
 public abstract class AbstractDnsRecord implements DnsRecord {
 
     private final String name;
@@ -61,10 +65,21 @@ public abstract class AbstractDnsRecord implements DnsRecord {
         if (timeToLive < 0) {
             throw new IllegalArgumentException("timeToLive: " + timeToLive + " (expected: >= 0)");
         }
-        this.name = checkNotNull(name, "name");
+        // Convert to ASCII which will also check that the length is not too big.
+        // See:
+        //   - https://github.com/netty/netty/issues/4937
+        //   - https://github.com/netty/netty/issues/4935
+        this.name = appendTrailingDot(IDN.toASCII(checkNotNull(name, "name")));
         this.type = checkNotNull(type, "type");
         this.dnsClass = (short) dnsClass;
         this.timeToLive = timeToLive;
+    }
+
+    private static String appendTrailingDot(String name) {
+        if (name.length() > 0 && name.charAt(name.length() - 1) != '.') {
+            return name + '.';
+        }
+        return name;
     }
 
     @Override

@@ -32,7 +32,6 @@ import java.io.IOException;
 import java.nio.channels.Channels;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static io.netty.util.ReferenceCountUtil.releaseLater;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -99,6 +98,13 @@ public class ChunkedWriteHandlerTest {
         check(new ChunkedNioFile(TMP), new ChunkedNioFile(TMP), new ChunkedNioFile(TMP));
     }
 
+    @Test
+    public void testUnchunkedData() throws IOException {
+        check(Unpooled.wrappedBuffer(BYTES));
+
+        check(Unpooled.wrappedBuffer(BYTES), Unpooled.wrappedBuffer(BYTES), Unpooled.wrappedBuffer(BYTES));
+    }
+
     // Test case which shows that there is not a bug like stated here:
     // http://stackoverflow.com/a/10426305
     @Test
@@ -107,7 +113,7 @@ public class ChunkedWriteHandlerTest {
 
         ChunkedInput<ByteBuf> input = new ChunkedInput<ByteBuf>() {
             private boolean done;
-            private final ByteBuf buffer = releaseLater(Unpooled.copiedBuffer("Test", CharsetUtil.ISO_8859_1));
+            private final ByteBuf buffer = Unpooled.copiedBuffer("Test", CharsetUtil.ISO_8859_1);
 
             @Override
             public boolean isEndOfInput() throws Exception {
@@ -116,7 +122,7 @@ public class ChunkedWriteHandlerTest {
 
             @Override
             public void close() throws Exception {
-                // NOOP
+                buffer.release();
             }
 
             @Deprecated
@@ -131,7 +137,7 @@ public class ChunkedWriteHandlerTest {
                     return null;
                 }
                 done = true;
-                return buffer.duplicate().retain();
+                return buffer.retainedDuplicate();
             }
 
             @Override
@@ -162,8 +168,12 @@ public class ChunkedWriteHandlerTest {
         // the listener should have been notified
         assertTrue(listenerNotified.get());
 
-        assertEquals(releaseLater(buffer), releaseLater(ch.readOutbound()));
+        ByteBuf buffer2 = ch.readOutbound();
+        assertEquals(buffer, buffer2);
         assertNull(ch.readOutbound());
+
+        buffer.release();
+        buffer2.release();
     }
 
     @Test
@@ -217,10 +227,10 @@ public class ChunkedWriteHandlerTest {
         assertNull(ch.readOutbound());
     }
 
-    private static void check(ChunkedInput<?>... inputs) {
+    private static void check(Object... inputs) {
         EmbeddedChannel ch = new EmbeddedChannel(new ChunkedWriteHandler());
 
-        for (ChunkedInput<?> input: inputs) {
+        for (Object input: inputs) {
             ch.writeOutbound(input);
         }
 

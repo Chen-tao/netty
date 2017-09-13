@@ -16,7 +16,7 @@
 
 package io.netty.resolver.dns;
 
-import io.netty.util.internal.ThreadLocalRandom;
+import io.netty.util.internal.PlatformDependent;
 
 import java.net.InetSocketAddress;
 import java.util.Random;
@@ -26,15 +26,25 @@ final class ShuffledDnsServerAddressStream implements DnsServerAddressStream {
     private final InetSocketAddress[] addresses;
     private int i;
 
+    /**
+     * Create a new instance.
+     * @param addresses The addresses are not cloned. It is assumed the caller has cloned this array or otherwise will
+     *                  not modify the contents.
+     */
     ShuffledDnsServerAddressStream(InetSocketAddress[] addresses) {
-        this.addresses = addresses.clone();
+        this.addresses = addresses;
 
         shuffle();
     }
 
+    private ShuffledDnsServerAddressStream(InetSocketAddress[] addresses, int startIdx) {
+        this.addresses = addresses;
+        i = startIdx;
+    }
+
     private void shuffle() {
         final InetSocketAddress[] addresses = this.addresses;
-        final Random r = ThreadLocalRandom.current();
+        final Random r = PlatformDependent.threadLocalRandom();
 
         for (int i = addresses.length - 1; i >= 0; i --) {
             InetSocketAddress tmp = addresses[i];
@@ -55,6 +65,16 @@ final class ShuffledDnsServerAddressStream implements DnsServerAddressStream {
             shuffle();
         }
         return next;
+    }
+
+    @Override
+    public int size() {
+        return addresses.length;
+    }
+
+    @Override
+    public ShuffledDnsServerAddressStream duplicate() {
+        return new ShuffledDnsServerAddressStream(addresses, i);
     }
 
     @Override

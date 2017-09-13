@@ -23,6 +23,7 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ClosedChannelException;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 
@@ -35,11 +36,11 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
 
     private final ByteBufAllocator alloc;
 
-    private long memoryAddress;
-    private ByteBuffer buffer;
     private ByteBuffer tmpNioBuf;
     private int capacity;
     private boolean doNotFree;
+    ByteBuffer buffer;
+    long memoryAddress;
 
     /**
      * Creates a new direct buffer.
@@ -64,7 +65,7 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
         }
 
         this.alloc = alloc;
-        setByteBuffer(allocateDirect(initialCapacity));
+        setByteBuffer(allocateDirect(initialCapacity), false);
     }
 
     /**
@@ -73,6 +74,19 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
      * @param maxCapacity the maximum capacity of the underlying direct buffer
      */
     protected UnpooledUnsafeDirectByteBuf(ByteBufAllocator alloc, ByteBuffer initialBuffer, int maxCapacity) {
+        // We never try to free the buffer if it was provided by the end-user as we not know if this is an duplicate or
+        // an slice. This is done to prevent an IllegalArgumentException when using Java9 as Unsafe.invokeCleaner(...)
+        // will check if the given buffer is either an duplicate or slice and in this case throw an
+        // IllegalArgumentException.
+        //
+        // See http://hg.openjdk.java.net/jdk9/hs-demo/jdk/file/0d2ab72ba600/src/jdk.unsupported/share/classes/
+        // sun/misc/Unsafe.java#l1250
+        //
+        // We also call slice() explicitly here to preserve behaviour with previous netty releases.
+        this(alloc, initialBuffer.slice(), maxCapacity, false);
+    }
+
+    UnpooledUnsafeDirectByteBuf(ByteBufAllocator alloc, ByteBuffer initialBuffer, int maxCapacity, boolean doFree) {
         super(maxCapacity);
         if (alloc == null) {
             throw new NullPointerException("alloc");
@@ -94,8 +108,8 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
         }
 
         this.alloc = alloc;
-        doNotFree = true;
-        setByteBuffer(initialBuffer.slice().order(ByteOrder.BIG_ENDIAN));
+        doNotFree = !doFree;
+        setByteBuffer(initialBuffer.order(ByteOrder.BIG_ENDIAN), false);
         writerIndex(initialCapacity);
     }
 
@@ -113,16 +127,17 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
         PlatformDependent.freeDirectBuffer(buffer);
     }
 
-    private void setByteBuffer(ByteBuffer buffer) {
-        ByteBuffer oldBuffer = this.buffer;
-        if (oldBuffer != null) {
-            if (doNotFree) {
-                doNotFree = false;
-            } else {
-                freeDirect(oldBuffer);
+    final void setByteBuffer(ByteBuffer buffer, boolean tryFree) {
+        if (tryFree) {
+            ByteBuffer oldBuffer = this.buffer;
+            if (oldBuffer != null) {
+                if (doNotFree) {
+                    doNotFree = false;
+                } else {
+                    freeDirect(oldBuffer);
+                }
             }
         }
-
         this.buffer = buffer;
         memoryAddress = PlatformDependent.directBufferAddress(buffer);
         tmpNioBuf = null;
@@ -141,10 +156,7 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
 
     @Override
     public ByteBuf capacity(int newCapacity) {
-        ensureAccessible();
-        if (newCapacity < 0 || newCapacity > maxCapacity()) {
-            throw new IllegalArgumentException("newCapacity: " + newCapacity);
-        }
+        checkNewCapacity(newCapacity);
 
         int readerIndex = readerIndex();
         int writerIndex = writerIndex();
@@ -157,7 +169,7 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
             newBuffer.position(0).limit(oldBuffer.capacity());
             newBuffer.put(oldBuffer);
             newBuffer.clear();
-            setByteBuffer(newBuffer);
+            setByteBuffer(newBuffer, true);
         } else if (newCapacity < oldCapacity) {
             ByteBuffer oldBuffer = buffer;
             ByteBuffer newBuffer = allocateDirect(newCapacity);
@@ -172,7 +184,7 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
             } else {
                 setIndex(newCapacity, newCapacity);
             }
-            setByteBuffer(newBuffer);
+            setByteBuffer(newBuffer, true);
         }
         return this;
     }
@@ -376,9 +388,33 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
     }
 
     @Override
+    public int getBytes(int index, FileChannel out, long position, int length) throws IOException {
+        return getBytes(index, out, position, length, false);
+    }
+
+    private int getBytes(int index, FileChannel out, long position, int length, boolean internal) throws IOException {
+        ensureAccessible();
+        if (length == 0) {
+            return 0;
+        }
+
+        ByteBuffer tmpBuf = internal ? internalNioBuffer() : buffer.duplicate();
+        tmpBuf.clear().position(index).limit(index + length);
+        return out.write(tmpBuf, position);
+    }
+
+    @Override
     public int readBytes(GatheringByteChannel out, int length) throws IOException {
         checkReadableBytes(length);
         int readBytes = getBytes(readerIndex, out, length, true);
+        readerIndex += readBytes;
+        return readBytes;
+    }
+
+    @Override
+    public int readBytes(FileChannel out, long position, int length) throws IOException {
+        checkReadableBytes(length);
+        int readBytes = getBytes(readerIndex, out, position, length, true);
         readerIndex += readBytes;
         return readBytes;
     }
@@ -395,6 +431,18 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
         tmpBuf.clear().position(index).limit(index + length);
         try {
             return in.read(tmpBuf);
+        } catch (ClosedChannelException ignored) {
+            return -1;
+        }
+    }
+
+    @Override
+    public int setBytes(int index, FileChannel in, long position, int length) throws IOException {
+        ensureAccessible();
+        ByteBuffer tmpBuf = internalNioBuffer();
+        tmpBuf.clear().position(index).limit(index + length);
+        try {
+            return in.read(tmpBuf, position);
         } catch (ClosedChannelException ignored) {
             return -1;
         }
@@ -465,5 +513,21 @@ public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf
             return new UnsafeDirectSwappedByteBuf(this);
         }
         return super.newSwappedByteBuf();
+    }
+
+    @Override
+    public ByteBuf setZero(int index, int length) {
+        checkIndex(index, length);
+        UnsafeByteBufUtil.setZero(addr(index), length);
+        return this;
+    }
+
+    @Override
+    public ByteBuf writeZero(int length) {
+        ensureWritable(length);
+        int wIndex = writerIndex;
+        UnsafeByteBufUtil.setZero(addr(wIndex), length);
+        writerIndex = wIndex + length;
+        return this;
     }
 }

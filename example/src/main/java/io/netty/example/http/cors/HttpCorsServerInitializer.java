@@ -61,7 +61,7 @@ import io.netty.handler.stream.ChunkedWriteHandler;
  * <li>Last-Modified</li>
  * <li>Pragma</li>
  * </ul>
- * Any of the above response headers can be retreived by:
+ * Any of the above response headers can be retrieved by:
  * <pre>
  * xhr.getResponseHeader("Content-Type");
  * </pre>
@@ -80,7 +80,7 @@ public class HttpCorsServerInitializer extends ChannelInitializer<SocketChannel>
 
     @Override
     public void initChannel(SocketChannel ch) {
-        CorsConfig corsConfig = CorsConfigBuilder.forAnyOrigin().build();
+        CorsConfig corsConfig = CorsConfigBuilder.forAnyOrigin().allowNullOrigin().allowCredentials().build();
         ChannelPipeline pipeline = ch.pipeline();
         if (sslCtx != null) {
             pipeline.addLast(sslCtx.newHandler(ch.alloc()));

@@ -54,7 +54,7 @@ public class HeadersBenchmark extends AbstractMicrobenchmark {
         return (name.startsWith(":")) ? name.substring(1) : name;
     }
 
-    private static String toHttp2Name(String name) {
+    static String toHttp2Name(String name) {
         name = name.toLowerCase();
         return (name.equals("host")) ? "xhost" : name;
     }
@@ -210,8 +210,8 @@ public class HeadersBenchmark extends AbstractMicrobenchmark {
     }
 
     private static final class SlowHeaders implements Headers<CharSequence, CharSequence, SlowHeaders> {
-        private final Headers<CharSequence, CharSequence, ? extends Headers> delegate;
-        private SlowHeaders(Headers<CharSequence, CharSequence, ? extends Headers> delegate) {
+        private final Headers<CharSequence, CharSequence, ? extends Headers<?, ?, ?>> delegate;
+        private SlowHeaders(Headers<CharSequence, CharSequence, ? extends Headers<?, ?, ?>> delegate) {
             this.delegate = delegate;
         }
 

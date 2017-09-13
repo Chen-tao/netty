@@ -14,11 +14,11 @@
  */
 package io.netty.handler.codec;
 
-import io.netty.handler.codec.DefaultHeaders.HeaderDateFormat;
 import io.netty.util.AsciiString;
 import io.netty.util.internal.PlatformDependent;
 
 import java.text.ParseException;
+import java.util.Date;
 
 /**
  * Converts to/from native types, general {@link Object}, and {@link CharSequence}s.
@@ -82,7 +82,7 @@ public class CharSequenceValueConverter implements ValueConverter<CharSequence> 
         if (value instanceof AsciiString) {
             return ((AsciiString) value).byteAt(0);
         }
-        return Byte.valueOf(value.toString());
+        return Byte.parseByte(value.toString());
     }
 
     @Override
@@ -100,7 +100,7 @@ public class CharSequenceValueConverter implements ValueConverter<CharSequence> 
         if (value instanceof AsciiString) {
             return ((AsciiString) value).parseShort();
         }
-        return Short.valueOf(value.toString());
+        return Short.parseShort(value.toString());
     }
 
     @Override
@@ -126,12 +126,12 @@ public class CharSequenceValueConverter implements ValueConverter<CharSequence> 
 
     @Override
     public long convertToTimeMillis(CharSequence value) {
-        try {
-            return HeaderDateFormat.get().parse(value.toString());
-        } catch (ParseException e) {
-            PlatformDependent.throwException(e);
+        Date date = DateFormatter.parseHttpDate(value);
+        if (date == null) {
+            PlatformDependent.throwException(new ParseException("header can't be parsed into a Date: " + value, 0));
             return 0;
         }
+        return date.getTime();
     }
 
     @Override
@@ -139,7 +139,7 @@ public class CharSequenceValueConverter implements ValueConverter<CharSequence> 
         if (value instanceof AsciiString) {
             return ((AsciiString) value).parseFloat();
         }
-        return Float.valueOf(value.toString());
+        return Float.parseFloat(value.toString());
     }
 
     @Override
@@ -147,6 +147,6 @@ public class CharSequenceValueConverter implements ValueConverter<CharSequence> 
         if (value instanceof AsciiString) {
             return ((AsciiString) value).parseDouble();
         }
-        return Double.valueOf(value.toString());
+        return Double.parseDouble(value.toString());
     }
 }

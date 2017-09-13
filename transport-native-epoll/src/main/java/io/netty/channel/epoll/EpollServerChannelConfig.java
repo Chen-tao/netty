@@ -16,20 +16,22 @@
 package io.netty.channel.epoll;
 
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.MessageSizeEstimator;
 import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
+import io.netty.channel.socket.ServerSocketChannelConfig;
 import io.netty.util.NetUtil;
 
-import java.net.InetAddress;
+import java.io.IOException;
 import java.util.Map;
 
 import static io.netty.channel.ChannelOption.SO_BACKLOG;
 import static io.netty.channel.ChannelOption.SO_RCVBUF;
 import static io.netty.channel.ChannelOption.SO_REUSEADDR;
-import static io.netty.channel.epoll.EpollChannelOption.TCP_MD5SIG;;
 
-public class EpollServerChannelConfig extends EpollChannelConfig {
+public class EpollServerChannelConfig extends EpollChannelConfig implements ServerSocketChannelConfig {
     protected final AbstractEpollChannel channel;
     private volatile int backlog = NetUtil.SOMAXCONN;
     private volatile int pendingFastOpenRequestsThreshold;
@@ -72,10 +74,6 @@ public class EpollServerChannelConfig extends EpollChannelConfig {
             setReuseAddress((Boolean) value);
         } else if (option == SO_BACKLOG) {
             setBacklog((Integer) value);
-        } else if (option == TCP_MD5SIG) {
-            @SuppressWarnings("unchecked")
-            final Map<InetAddress, byte[]> m = (Map<InetAddress, byte[]>) value;
-            ((EpollServerSocketChannel) channel).setTcpMd5Sig(m);
         } else if (option == EpollChannelOption.TCP_FASTOPEN) {
             setTcpFastopen((Integer) value);
         } else {
@@ -86,21 +84,37 @@ public class EpollServerChannelConfig extends EpollChannelConfig {
     }
 
     public boolean isReuseAddress() {
-        return Native.isReuseAddress(channel.fd().intValue()) == 1;
+        try {
+            return channel.socket.isReuseAddress();
+        } catch (IOException e) {
+            throw new ChannelException(e);
+        }
     }
 
     public EpollServerChannelConfig setReuseAddress(boolean reuseAddress) {
-        Native.setReuseAddress(channel.fd().intValue(), reuseAddress ? 1 : 0);
-        return this;
+        try {
+            channel.socket.setReuseAddress(reuseAddress);
+            return this;
+        } catch (IOException e) {
+            throw new ChannelException(e);
+        }
     }
 
     public int getReceiveBufferSize() {
-        return channel.fd().getReceiveBufferSize();
+        try {
+            return channel.socket.getReceiveBufferSize();
+        } catch (IOException e) {
+            throw new ChannelException(e);
+        }
     }
 
     public EpollServerChannelConfig setReceiveBufferSize(int receiveBufferSize) {
-        channel.fd().setReceiveBufferSize(receiveBufferSize);
-        return this;
+        try {
+            channel.socket.setReceiveBufferSize(receiveBufferSize);
+            return this;
+        } catch (IOException e) {
+            throw new ChannelException(e);
+        }
     }
 
     public int getBacklog() {
@@ -142,6 +156,11 @@ public class EpollServerChannelConfig extends EpollChannelConfig {
     }
 
     @Override
+    public EpollServerChannelConfig setPerformancePreferences(int connectionTime, int latency, int bandwidth) {
+        return this;
+    }
+
+    @Override
     public EpollServerChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis) {
         super.setConnectTimeoutMillis(connectTimeoutMillis);
         return this;
@@ -179,14 +198,22 @@ public class EpollServerChannelConfig extends EpollChannelConfig {
     }
 
     @Override
+    @Deprecated
     public EpollServerChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
         super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
         return this;
     }
 
     @Override
+    @Deprecated
     public EpollServerChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
         super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public EpollServerChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
         return this;
     }
 

@@ -19,7 +19,9 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.PreferHeapByteBufAllocator;
 import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.channel.socket.DefaultServerSocketChannelConfig;
 import io.netty.channel.socket.ServerSocketChannel;
 
@@ -38,10 +40,12 @@ public class DefaultOioServerSocketChannelConfig extends DefaultServerSocketChan
     @Deprecated
     public DefaultOioServerSocketChannelConfig(ServerSocketChannel channel, ServerSocket javaSocket) {
         super(channel, javaSocket);
+        setAllocator(new PreferHeapByteBufAllocator(getAllocator()));
     }
 
     DefaultOioServerSocketChannelConfig(OioServerSocketChannel channel, ServerSocket javaSocket) {
         super(channel, javaSocket);
+        setAllocator(new PreferHeapByteBufAllocator(getAllocator()));
     }
 
     @Override
@@ -154,7 +158,7 @@ public class DefaultOioServerSocketChannelConfig extends DefaultServerSocketChan
     @Override
     protected void autoReadCleared() {
         if (channel instanceof OioServerSocketChannel) {
-            ((OioServerSocketChannel) channel).setReadPending(false);
+            ((OioServerSocketChannel) channel).clearReadPending0();
         }
     }
 
@@ -173,6 +177,12 @@ public class DefaultOioServerSocketChannelConfig extends DefaultServerSocketChan
     @Override
     public OioServerSocketChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
         super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public OioServerSocketChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
         return this;
     }
 

@@ -16,10 +16,12 @@
 package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The default implementation of the {@link BinaryMemcacheResponse}.
  */
+@UnstableApi
 public class DefaultBinaryMemcacheResponse extends AbstractBinaryMemcacheMessage implements BinaryMemcacheResponse {
 
     /**
@@ -41,17 +43,8 @@ public class DefaultBinaryMemcacheResponse extends AbstractBinaryMemcacheMessage
      *
      * @param key    the key to use
      */
-    public DefaultBinaryMemcacheResponse(String key) {
+    public DefaultBinaryMemcacheResponse(ByteBuf key) {
         this(key, null);
-    }
-
-    /**
-     * Create a new {@link DefaultBinaryMemcacheResponse} with the header and extras.
-     *
-     * @param extras the extras to use.
-     */
-    public DefaultBinaryMemcacheResponse(ByteBuf extras) {
-        this(null, extras);
     }
 
     /**
@@ -60,7 +53,7 @@ public class DefaultBinaryMemcacheResponse extends AbstractBinaryMemcacheMessage
      * @param key    the key to use.
      * @param extras the extras to use.
      */
-    public DefaultBinaryMemcacheResponse(String key, ByteBuf extras) {
+    public DefaultBinaryMemcacheResponse(ByteBuf key, ByteBuf extras) {
         super(key, extras);
         setMagic(RESPONSE_MAGIC_BYTE);
     }

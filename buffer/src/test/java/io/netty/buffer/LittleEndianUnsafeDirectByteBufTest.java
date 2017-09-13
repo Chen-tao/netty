@@ -22,12 +22,14 @@ import org.junit.Before;
 public class LittleEndianUnsafeDirectByteBufTest extends LittleEndianDirectByteBufTest {
 
     @Before
-    public void checkHasUnsafe() {
+    @Override
+    public void init() {
         Assume.assumeTrue("sun.misc.Unsafe not found, skip tests", PlatformDependent.hasUnsafe());
+        super.init();
     }
 
     @Override
-    protected ByteBuf newBuffer(int length) {
-        return new UnpooledUnsafeDirectByteBuf(UnpooledByteBufAllocator.DEFAULT, length, Integer.MAX_VALUE);
+    protected ByteBuf newBuffer(int length, int maxCapacity) {
+        return new UnpooledUnsafeDirectByteBuf(UnpooledByteBufAllocator.DEFAULT, length, maxCapacity);
     }
 }

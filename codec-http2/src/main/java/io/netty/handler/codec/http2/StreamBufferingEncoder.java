@@ -21,6 +21,7 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.util.ReferenceCountUtil;
+import io.netty.util.internal.UnstableApi;
 
 import java.util.ArrayDeque;
 import java.util.Iterator;
@@ -46,10 +47,15 @@ import static io.netty.handler.codec.http2.Http2Exception.connectionError;
  * with an ID less than the specified {@code lastStreamId} will immediately fail with a
  * {@link Http2GoAwayException}.
  * <p/>
+ * <p>
+ * If the channel/encoder gets closed, all new and buffered writes will immediately fail with a
+ * {@link Http2ChannelClosedException}.
+ * </p>
  * <p>This implementation makes the buffering mostly transparent and is expected to be used as a
  * drop-in decorator of {@link DefaultHttp2ConnectionEncoder}.
  * </p>
  */
+@UnstableApi
 public class StreamBufferingEncoder extends DecoratingHttp2ConnectionEncoder {
 
     /**
@@ -234,7 +240,11 @@ public class StreamBufferingEncoder extends DecoratingHttp2ConnectionEncoder {
         while (!pendingStreams.isEmpty() && canCreateStream()) {
             Map.Entry<Integer, PendingStream> entry = pendingStreams.pollFirstEntry();
             PendingStream pendingStream = entry.getValue();
-            pendingStream.sendFrames();
+            try {
+                pendingStream.sendFrames();
+            } catch (Throwable t) {
+                pendingStream.close(t);
+            }
         }
     }
 
@@ -326,8 +336,7 @@ public class StreamBufferingEncoder extends DecoratingHttp2ConnectionEncoder {
 
         @Override
         void send(ChannelHandlerContext ctx, int streamId) {
-            writeHeaders(ctx, streamId, headers, streamDependency, weight, exclusive, padding,
-                    endOfStream, promise);
+            writeHeaders(ctx, streamId, headers, streamDependency, weight, exclusive, padding, endOfStream, promise);
         }
     }
 

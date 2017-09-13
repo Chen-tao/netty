@@ -16,7 +16,6 @@
 
 package io.netty.util;
 
-import io.netty.util.internal.MathUtil;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
@@ -26,13 +25,13 @@ import java.lang.ref.PhantomReference;
 import java.lang.ref.ReferenceQueue;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.EnumSet;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-import static io.netty.util.internal.StringUtil.*;
+import static io.netty.util.internal.StringUtil.EMPTY_STRING;
+import static io.netty.util.internal.StringUtil.NEWLINE;
+import static io.netty.util.internal.StringUtil.simpleClassName;
 
-public final class ResourceLeakDetector<T> {
+public class ResourceLeakDetector<T> {
 
     private static final String PROP_LEVEL_OLD = "io.netty.leakDetectionLevel";
     private static final String PROP_LEVEL = "io.netty.leakDetection.level";
@@ -64,7 +63,23 @@ public final class ResourceLeakDetector<T> {
          * Enables paranoid resource leak detection which reports where the leaked object was accessed recently,
          * at the cost of the highest possible overhead (for testing purposes only).
          */
-        PARANOID
+        PARANOID;
+
+        /**
+         * Returns level based on string value. Accepts also string that represents ordinal number of enum.
+         *
+         * @param levelStr - level string : DISABLED, SIMPLE, ADVANCED, PARANOID. Ignores case.
+         * @return corresponding level or SIMPLE level in case of no match.
+         */
+        static Level parseLevel(String levelStr) {
+            String trimmedLevelStr = levelStr.trim();
+            for (Level l : values()) {
+                if (trimmedLevelStr.equalsIgnoreCase(l.name()) || trimmedLevelStr.equals(String.valueOf(l.ordinal()))) {
+                    return l;
+                }
+            }
+            return DEFAULT_LEVEL;
+        }
     }
 
     private static Level level;
@@ -86,16 +101,11 @@ public final class ResourceLeakDetector<T> {
         Level defaultLevel = disabled? Level.DISABLED : DEFAULT_LEVEL;
 
         // First read old property name
-        String levelStr = SystemPropertyUtil.get(PROP_LEVEL_OLD, defaultLevel.name()).trim().toUpperCase();
+        String levelStr = SystemPropertyUtil.get(PROP_LEVEL_OLD, defaultLevel.name());
 
         // If new property name is present, use it
-        levelStr = SystemPropertyUtil.get(PROP_LEVEL, levelStr).trim().toUpperCase();
-        Level level = DEFAULT_LEVEL;
-        for (Level l: EnumSet.allOf(Level.class)) {
-            if (levelStr.equals(l.name()) || levelStr.equals(String.valueOf(l.ordinal()))) {
-                level = l;
-            }
-        }
+        levelStr = SystemPropertyUtil.get(PROP_LEVEL, levelStr);
+        Level level = Level.parseLevel(levelStr);
 
         MAX_RECORDS = SystemPropertyUtil.getInt(PROP_MAX_RECORDS, DEFAULT_MAX_RECORDS);
 
@@ -107,7 +117,7 @@ public final class ResourceLeakDetector<T> {
     }
 
     // Should be power of two.
-    private static final int DEFAULT_SAMPLING_INTERVAL = 128;
+    static final int DEFAULT_SAMPLING_INTERVAL = 128;
 
     /**
      * @deprecated Use {@link #setLevel(Level)} instead.
@@ -141,54 +151,68 @@ public final class ResourceLeakDetector<T> {
         return level;
     }
 
-    /** the linked list of active resources */
-    private final DefaultResourceLeak head = new DefaultResourceLeak(null);
-    private final DefaultResourceLeak tail = new DefaultResourceLeak(null);
+    /** the collection of active resources */
+    private final ConcurrentMap<DefaultResourceLeak, LeakEntry> allLeaks = PlatformDependent.newConcurrentHashMap();
 
     private final ReferenceQueue<Object> refQueue = new ReferenceQueue<Object>();
     private final ConcurrentMap<String, Boolean> reportedLeaks = PlatformDependent.newConcurrentHashMap();
 
     private final String resourceType;
     private final int samplingInterval;
-    private final int mask;
-    private final long maxActive;
-    private long active;
-    private final AtomicBoolean loggedTooManyActive = new AtomicBoolean();
 
-    private long leakCheckCnt;
-
+    /**
+     * @deprecated use {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class, int, long)}.
+     */
+    @Deprecated
     public ResourceLeakDetector(Class<?> resourceType) {
         this(simpleClassName(resourceType));
     }
 
+    /**
+     * @deprecated use {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class, int, long)}.
+     */
+    @Deprecated
     public ResourceLeakDetector(String resourceType) {
         this(resourceType, DEFAULT_SAMPLING_INTERVAL, Long.MAX_VALUE);
     }
 
+    /**
+     * @deprecated Use {@link ResourceLeakDetector#ResourceLeakDetector(Class, int)}.
+     * <p>
+     * This should not be used directly by users of {@link ResourceLeakDetector}.
+     * Please use {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class)}
+     * or {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class, int, long)}
+     *
+     * @param maxActive This is deprecated and will be ignored.
+     */
+    @Deprecated
     public ResourceLeakDetector(Class<?> resourceType, int samplingInterval, long maxActive) {
-        this(simpleClassName(resourceType), samplingInterval, maxActive);
+        this(resourceType, samplingInterval);
     }
 
+    /**
+     * This should not be used directly by users of {@link ResourceLeakDetector}.
+     * Please use {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class)}
+     * or {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class, int, long)}
+     */
+    @SuppressWarnings("deprecation")
+    public ResourceLeakDetector(Class<?> resourceType, int samplingInterval) {
+        this(simpleClassName(resourceType), samplingInterval, Long.MAX_VALUE);
+    }
+
+    /**
+     * @deprecated use {@link ResourceLeakDetectorFactory#newResourceLeakDetector(Class, int, long)}.
+     * <p>
+     * @param maxActive This is deprecated and will be ignored.
+     */
+    @Deprecated
     public ResourceLeakDetector(String resourceType, int samplingInterval, long maxActive) {
         if (resourceType == null) {
             throw new NullPointerException("resourceType");
         }
-        if (samplingInterval <= 0) {
-            throw new IllegalArgumentException("samplingInterval: " + samplingInterval + " (expected: 1+)");
-        }
-        if (maxActive <= 0) {
-            throw new IllegalArgumentException("maxActive: " + maxActive + " (expected: 1+)");
-        }
 
         this.resourceType = resourceType;
-        this.samplingInterval = MathUtil.findNextPositivePowerOfTwo(samplingInterval);
-        // samplingInterval is a power of two so we calculate a mask that we can use to
-        // check if we need to do any leak detection or not.
-        mask = this.samplingInterval - 1;
-        this.maxActive = maxActive;
-
-        head.next = tail;
-        tail.prev = head;
+        this.samplingInterval = samplingInterval;
     }
 
     /**
@@ -196,15 +220,31 @@ public final class ResourceLeakDetector<T> {
      * related resource is deallocated.
      *
      * @return the {@link ResourceLeak} or {@code null}
+     * @deprecated use {@link #track(Object)}
      */
-    public ResourceLeak open(T obj) {
+    @Deprecated
+    public final ResourceLeak open(T obj) {
+        return track0(obj);
+    }
+
+    /**
+     * Creates a new {@link ResourceLeakTracker} which is expected to be closed via
+     * {@link ResourceLeakTracker#close(Object)} when the related resource is deallocated.
+     *
+     * @return the {@link ResourceLeakTracker} or {@code null}
+     */
+    public final ResourceLeakTracker<T> track(T obj) {
+        return track0(obj);
+    }
+
+    private DefaultResourceLeak track0(T obj) {
         Level level = ResourceLeakDetector.level;
         if (level == Level.DISABLED) {
             return null;
         }
 
         if (level.ordinal() < Level.PARANOID.ordinal()) {
-            if ((leakCheckCnt ++ & mask) == 0) {
+            if ((PlatformDependent.threadLocalRandom().nextInt(samplingInterval)) == 0) {
                 reportLeak(level);
                 return new DefaultResourceLeak(obj);
             } else {
@@ -229,14 +269,6 @@ public final class ResourceLeakDetector<T> {
             return;
         }
 
-        // Report too many instances.
-        int samplingInterval = level == Level.PARANOID? 1 : this.samplingInterval;
-        if (active * samplingInterval > maxActive && loggedTooManyActive.compareAndSet(false, true)) {
-            logger.error("LEAK: You are creating too many " + resourceType + " instances.  " +
-                    resourceType + " is a shared resource that must be reused across the JVM," +
-                    "so that only a few instances are created.");
-        }
-
         // Detect and report previous leaks.
         for (;;) {
             @SuppressWarnings("unchecked")
@@ -254,53 +286,71 @@ public final class ResourceLeakDetector<T> {
             String records = ref.toString();
             if (reportedLeaks.putIfAbsent(records, Boolean.TRUE) == null) {
                 if (records.isEmpty()) {
-                    logger.error("LEAK: {}.release() was not called before it's garbage-collected. " +
-                            "Enable advanced leak reporting to find out where the leak occurred. " +
-                            "To enable advanced leak reporting, " +
-                            "specify the JVM option '-D{}={}' or call {}.setLevel() " +
-                            "See http://netty.io/wiki/reference-counted-objects.html for more information.",
-                            resourceType, PROP_LEVEL, Level.ADVANCED.name().toLowerCase(), simpleClassName(this));
+                    reportUntracedLeak(resourceType);
                 } else {
-                    logger.error(
-                            "LEAK: {}.release() was not called before it's garbage-collected. " +
-                            "See http://netty.io/wiki/reference-counted-objects.html for more information.{}",
-                            resourceType, records);
+                    reportTracedLeak(resourceType, records);
                 }
             }
         }
     }
 
-    private final class DefaultResourceLeak extends PhantomReference<Object> implements ResourceLeak {
+    /**
+     * This method is called when a traced leak is detected. It can be overridden for tracking how many times leaks
+     * have been detected.
+     */
+    protected void reportTracedLeak(String resourceType, String records) {
+        logger.error(
+                "LEAK: {}.release() was not called before it's garbage-collected. " +
+                "See http://netty.io/wiki/reference-counted-objects.html for more information.{}",
+                resourceType, records);
+    }
+
+    /**
+     * This method is called when an untraced leak is detected. It can be overridden for tracking how many times leaks
+     * have been detected.
+     */
+    protected void reportUntracedLeak(String resourceType) {
+        logger.error("LEAK: {}.release() was not called before it's garbage-collected. " +
+                "Enable advanced leak reporting to find out where the leak occurred. " +
+                "To enable advanced leak reporting, " +
+                "specify the JVM option '-D{}={}' or call {}.setLevel() " +
+                "See http://netty.io/wiki/reference-counted-objects.html for more information.",
+                resourceType, PROP_LEVEL, Level.ADVANCED.name().toLowerCase(), simpleClassName(this));
+    }
+
+    /**
+     * @deprecated This method will no longer be invoked by {@link ResourceLeakDetector}.
+     */
+    @Deprecated
+    protected void reportInstancesLeak(String resourceType) {
+    }
+
+    @SuppressWarnings("deprecation")
+    private final class DefaultResourceLeak extends PhantomReference<Object> implements ResourceLeakTracker<T>,
+            ResourceLeak {
         private final String creationRecord;
         private final Deque<String> lastRecords = new ArrayDeque<String>();
-        private final AtomicBoolean freed;
-        private DefaultResourceLeak prev;
-        private DefaultResourceLeak next;
+        private final int trackedHash;
+
+        private int removedRecords;
 
         DefaultResourceLeak(Object referent) {
-            super(referent, referent != null? refQueue : null);
+            super(referent, refQueue);
 
-            if (referent != null) {
-                Level level = getLevel();
-                if (level.ordinal() >= Level.ADVANCED.ordinal()) {
-                    creationRecord = newRecord(null, 3);
-                } else {
-                    creationRecord = null;
-                }
+            assert referent != null;
 
-                // TODO: Use CAS to update the list.
-                synchronized (head) {
-                    prev = head;
-                    next = head.next;
-                    head.next.prev = this;
-                    head.next = this;
-                    active ++;
-                }
-                freed = new AtomicBoolean();
+            // Store the hash of the tracked object to later assert it in the close(...) method.
+            // It's important that we not store a reference to the referent as this would disallow it from
+            // be collected via the PhantomReference.
+            trackedHash = System.identityHashCode(referent);
+
+            Level level = getLevel();
+            if (level.ordinal() >= Level.ADVANCED.ordinal()) {
+                creationRecord = newRecord(null, 3);
             } else {
                 creationRecord = null;
-                freed = new AtomicBoolean(true);
             }
+            allLeaks.put(this, LeakEntry.INSTANCE);
         }
 
         @Override
@@ -314,16 +364,18 @@ public final class ResourceLeakDetector<T> {
         }
 
         private void record0(Object hint, int recordsToSkip) {
-            if (creationRecord != null) {
+            // Check MAX_RECORDS > 0 here to avoid similar check before remove from and add to lastRecords
+            if (creationRecord != null && MAX_RECORDS > 0) {
                 String value = newRecord(hint, recordsToSkip);
 
                 synchronized (lastRecords) {
                     int size = lastRecords.size();
                     if (size == 0 || !lastRecords.getLast().equals(value)) {
+                        if (size >= MAX_RECORDS) {
+                            lastRecords.removeFirst();
+                            ++removedRecords;
+                        }
                         lastRecords.add(value);
-                    }
-                    if (size > MAX_RECORDS) {
-                        lastRecords.removeFirst();
                     }
                 }
             }
@@ -331,35 +383,49 @@ public final class ResourceLeakDetector<T> {
 
         @Override
         public boolean close() {
-            if (freed.compareAndSet(false, true)) {
-                synchronized (head) {
-                    active --;
-                    prev.next = next;
-                    next.prev = prev;
-                    prev = null;
-                    next = null;
-                }
-                return true;
-            }
-            return false;
+            // Use the ConcurrentMap remove method, which avoids allocating an iterator.
+            return allLeaks.remove(this, LeakEntry.INSTANCE);
+        }
+
+        @Override
+        public boolean close(T trackedObject) {
+            // Ensure that the object that was tracked is the same as the one that was passed to close(...).
+            assert trackedHash == System.identityHashCode(trackedObject);
+
+            // We need to actually do the null check of the trackedObject after we close the leak because otherwise
+            // we may get false-positives reported by the ResourceLeakDetector. This can happen as the JIT / GC may
+            // be able to figure out that we do not need the trackedObject anymore and so already enqueue it for
+            // collection before we actually get a chance to close the enclosing ResourceLeak.
+            return close() && trackedObject != null;
         }
 
         @Override
         public String toString() {
             if (creationRecord == null) {
-                return "";
+                return EMPTY_STRING;
             }
 
-            Object[] array;
+            final Object[] array;
+            final int removedRecords;
             synchronized (lastRecords) {
                 array = lastRecords.toArray();
+                removedRecords = this.removedRecords;
             }
 
-            StringBuilder buf = new StringBuilder(16384)
-                .append(NEWLINE)
-                .append("Recent access records: ")
-                .append(array.length)
+            StringBuilder buf = new StringBuilder(16384).append(NEWLINE);
+            if (removedRecords > 0) {
+                buf.append("WARNING: ")
+                .append(removedRecords)
+                .append(" leak records were discarded because the leak record count is limited to ")
+                .append(MAX_RECORDS)
+                .append(". Use system property ")
+                .append(PROP_MAX_RECORDS)
+                .append(" to increase the limit.")
                 .append(NEWLINE);
+            }
+            buf.append("Recent access records: ")
+            .append(array.length)
+            .append(NEWLINE);
 
             if (array.length > 0) {
                 for (int i = array.length - 1; i >= 0; i --) {
@@ -428,5 +494,23 @@ public final class ResourceLeakDetector<T> {
         }
 
         return buf.toString();
+    }
+
+    private static final class LeakEntry {
+        static final LeakEntry INSTANCE = new LeakEntry();
+        private static final int HASH = System.identityHashCode(INSTANCE);
+
+        private LeakEntry() {
+        }
+
+        @Override
+        public int hashCode() {
+            return HASH;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj == this;
+        }
     }
 }

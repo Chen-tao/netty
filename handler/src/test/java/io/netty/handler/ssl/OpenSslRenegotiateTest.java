@@ -15,14 +15,18 @@
  */
 package io.netty.handler.ssl;
 
-import org.junit.Assume;
+import org.junit.BeforeClass;
+
+import static org.junit.Assume.assumeFalse;
+import static org.junit.Assume.assumeTrue;
 
 public class OpenSslRenegotiateTest extends RenegotiateTest {
 
-    @Override
-    public void testRenegotiateServer() throws Throwable {
-        Assume.assumeTrue(OpenSsl.isAvailable());
-        super.testRenegotiateServer();
+    @BeforeClass
+    public static void checkOpenSsl() {
+        assumeTrue(OpenSsl.isAvailable());
+        // BoringSSL does not support renegotiation intentionally.
+        assumeFalse("BoringSSL".equals(OpenSsl.versionString()));
     }
 
     @Override

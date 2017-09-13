@@ -15,11 +15,13 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * A {@link Http2FlowController} for controlling the flow of outbound {@code DATA} frames to the remote
  * endpoint.
  */
+@UnstableApi
 public interface Http2RemoteFlowController extends Http2FlowController {
     /**
      * Get the {@link ChannelHandlerContext} for which to apply flow control on.
@@ -42,6 +44,13 @@ public interface Http2RemoteFlowController extends Http2FlowController {
     void addFlowControlled(Http2Stream stream, FlowControlled payload);
 
     /**
+     * Determine if {@code stream} has any {@link FlowControlled} frames currently queued.
+     * @param stream the stream to check if it has flow controlled frames.
+     * @return {@code true} if {@code stream} has any {@link FlowControlled} frames currently queued.
+     */
+    boolean hasFlowControlled(Http2Stream stream);
+
+    /**
      * Write all data pending in the flow controller up to the flow-control limits.
      *
      * @throws Http2Exception throws if a protocol-related error occurred.
@@ -58,11 +67,12 @@ public interface Http2RemoteFlowController extends Http2FlowController {
     /**
      * Determine if the {@code stream} has bytes remaining for use in the flow control window.
      * <p>
-     * Note that this only takes into account HTTP/2 flow control. It does <strong>not</strong> take into account
-     * the underlying {@link io.netty.channel.Channel#isWritable()}.
+     * Note that this method respects channel writability. The channel must be writable for this method to
+     * return {@code true}.
+     *
      * @param stream The stream to test.
-     * @return {@code true} if if the {@code stream} has bytes remaining for use in the flow control window.
-     * {@code false} otherwise.
+     * @return {@code true} if the {@code stream} has bytes remaining for use in the flow control window and the
+     * channel is writable, {@code false} otherwise.
      */
     boolean isWritable(Http2Stream stream);
 
@@ -71,6 +81,17 @@ public interface Http2RemoteFlowController extends Http2FlowController {
      * @throws Http2Exception If any writes occur as a result of this call and encounter errors.
      */
     void channelWritabilityChanged() throws Http2Exception;
+
+    /**
+     * Explicitly update the dependency tree. This method is called independently of stream state changes.
+     * @param childStreamId The stream identifier associated with the child stream.
+     * @param parentStreamId The stream identifier associated with the parent stream. May be {@code 0},
+     *                       to make {@code childStreamId} and immediate child of the connection.
+     * @param weight The weight which is used relative to other child streams for {@code parentStreamId}. This value
+     *               must be between 1 and 256 (inclusive).
+     * @param exclusive If {@code childStreamId} should be the exclusive dependency of {@code parentStreamId}.
+     */
+    void updateDependencyTree(int childStreamId, int parentStreamId, short weight, boolean exclusive);
 
     /**
      * Implementations of this interface are used to progressively write chunks of the underlying

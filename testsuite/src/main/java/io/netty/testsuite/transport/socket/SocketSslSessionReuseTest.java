@@ -27,7 +27,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.ssl.JdkSslClientContext;
-import io.netty.handler.ssl.JdkSslContext;
 import io.netty.handler.ssl.JdkSslServerContext;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
@@ -128,16 +127,16 @@ public class SocketSslSessionReuseTest extends AbstractSocketTest {
         });
 
         try {
-            SSLSessionContext clientSessionCtx = ((JdkSslContext) clientCtx).sessionContext();
+            SSLSessionContext clientSessionCtx = clientCtx.sessionContext();
             ByteBuf msg = Unpooled.wrappedBuffer(new byte[] { 0xa, 0xb, 0xc, 0xd }, 0, 4);
-            Channel cc = cb.connect().sync().channel();
+            Channel cc = cb.connect(sc.localAddress()).sync().channel();
             cc.writeAndFlush(msg).sync();
             cc.closeFuture().sync();
             rethrowHandlerExceptions(sh, ch);
             Set<String> sessions = sessionIdSet(clientSessionCtx.getIds());
 
             msg = Unpooled.wrappedBuffer(new byte[] { 0xa, 0xb, 0xc, 0xd }, 0, 4);
-            cc = cb.connect().sync().channel();
+            cc = cb.connect(sc.localAddress()).sync().channel();
             cc.writeAndFlush(msg).sync();
             cc.closeFuture().sync();
             assertEquals("Expected no new sessions", sessions, sessionIdSet(clientSessionCtx.getIds()));
@@ -147,7 +146,7 @@ public class SocketSslSessionReuseTest extends AbstractSocketTest {
         }
     }
 
-    private void rethrowHandlerExceptions(ReadAndDiscardHandler sh, ReadAndDiscardHandler ch) throws Throwable {
+    private static void rethrowHandlerExceptions(ReadAndDiscardHandler sh, ReadAndDiscardHandler ch) throws Throwable {
         if (sh.exception.get() != null && !(sh.exception.get() instanceof IOException)) {
             throw sh.exception.get();
         }
@@ -162,7 +161,7 @@ public class SocketSslSessionReuseTest extends AbstractSocketTest {
         }
     }
 
-    private Set<String> sessionIdSet(Enumeration<byte[]> sessionIds) {
+    private static Set<String> sessionIdSet(Enumeration<byte[]> sessionIds) {
         Set<String> idSet = new HashSet<String>();
         byte[] id;
         while (sessionIds.hasMoreElements()) {

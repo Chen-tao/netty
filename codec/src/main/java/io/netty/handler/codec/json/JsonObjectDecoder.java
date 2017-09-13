@@ -45,6 +45,8 @@ public class JsonObjectDecoder extends ByteToMessageDecoder {
     private int openBraces;
     private int idx;
 
+    private int lastReaderIndex;
+
     private int state;
     private boolean insideString;
 
@@ -86,6 +88,14 @@ public class JsonObjectDecoder extends ByteToMessageDecoder {
         if (state == ST_CORRUPTED) {
             in.skipBytes(in.readableBytes());
             return;
+        }
+
+        if (this.idx > in.readerIndex() && lastReaderIndex != in.readerIndex()) {
+            this.idx = in.readerIndex();
+            if (state == ST_DECODING_ARRAY_STREAM) {
+                insideString = false;
+                openBraces = 1;
+            }
         }
 
         // index of next byte to process.
@@ -170,6 +180,7 @@ public class JsonObjectDecoder extends ByteToMessageDecoder {
         } else {
             this.idx = idx;
         }
+        this.lastReaderIndex = in.readerIndex();
     }
 
     /**
@@ -177,7 +188,7 @@ public class JsonObjectDecoder extends ByteToMessageDecoder {
      */
     @SuppressWarnings("UnusedParameters")
     protected ByteBuf extractObject(ChannelHandlerContext ctx, ByteBuf buffer, int index, int length) {
-        return buffer.slice(index, length).retain();
+        return buffer.retainedSlice(index, length);
     }
 
     private void decodeByte(byte c, ByteBuf in, int idx) {
@@ -190,9 +201,22 @@ public class JsonObjectDecoder extends ByteToMessageDecoder {
             // also contain braces/brackets and that could lead to incorrect results.
             if (!insideString) {
                 insideString = true;
-            // If the double quote wasn't escaped then this is the end of a string.
-            } else if (in.getByte(idx - 1) != '\\') {
-                insideString = false;
+            } else {
+                int backslashCount = 0;
+                idx--;
+                while (idx >= 0) {
+                    if (in.getByte(idx) == '\\') {
+                        backslashCount++;
+                        idx--;
+                    } else {
+                        break;
+                    }
+                }
+                // The double quote isn't escaped only if there are even "\"s.
+                if (backslashCount % 2 == 0) {
+                    // Since the double quote isn't escaped then this is the end of a string.
+                    insideString = false;
+                }
             }
         }
     }

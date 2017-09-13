@@ -15,7 +15,7 @@
  */
 package io.netty.channel;
 
-import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.OrderedEventExecutor;
 
 /**
  * Will handle all the I/O operations for a {@link Channel} once registered.
@@ -24,13 +24,7 @@ import io.netty.util.concurrent.EventExecutor;
  * implementation details and internals.
  *
  */
-public interface EventLoop extends EventExecutor, EventLoopGroup {
+public interface EventLoop extends OrderedEventExecutor, EventLoopGroup {
     @Override
     EventLoopGroup parent();
-
-    /**
-     * Creates a new default {@link ChannelHandlerInvoker} implementation that uses this {@link EventLoop} to
-     * invoke event handler methods.
-     */
-    ChannelHandlerInvoker asInvoker();
 }

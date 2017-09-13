@@ -17,6 +17,8 @@ package io.netty.microbench.util;
 
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.internal.SystemPropertyUtil;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -32,47 +34,47 @@ import org.openjdk.jmh.runner.options.ChainedOptionsBuilder;
 public class AbstractMicrobenchmark extends AbstractMicrobenchmarkBase {
 
     protected static final int DEFAULT_FORKS = 2;
-    protected static final String[] JVM_ARGS;
-
-    static {
-        final String[] customArgs = {
-        "-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m", "-Djmh.executor=CUSTOM",
-        "-Djmh.executor.class=io.netty.microbench.util.AbstractMicrobenchmark$HarnessExecutor" };
-
-        JVM_ARGS = new String[BASE_JVM_ARGS.length + customArgs.length];
-        System.arraycopy(BASE_JVM_ARGS, 0, JVM_ARGS, 0, BASE_JVM_ARGS.length);
-        System.arraycopy(customArgs, 0, JVM_ARGS, BASE_JVM_ARGS.length, customArgs.length);
-    }
 
     public static final class HarnessExecutor extends ThreadPoolExecutor {
+        private final  InternalLogger logger = InternalLoggerFactory.getInstance(AbstractMicrobenchmark.class);
+
         public HarnessExecutor(int maxThreads, String prefix) {
             super(maxThreads, maxThreads, 0, TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<Runnable>(), new DefaultThreadFactory(prefix));
-            System.out.println("Using harness executor");
+            logger.debug("Using harness executor");
         }
     }
 
-    private final boolean disableAssertions;
-    private String[] jvmArgsWithNoAssertions;
+    private final String[] jvmArgs;
 
     public AbstractMicrobenchmark() {
-        this(false);
+        this(false, false);
     }
 
     public AbstractMicrobenchmark(boolean disableAssertions) {
-        this.disableAssertions = disableAssertions;
+        this(disableAssertions, false);
+    }
+
+    public AbstractMicrobenchmark(boolean disableAssertions, boolean disableHarnessExecutor) {
+        final String[] customArgs;
+        if (disableHarnessExecutor) {
+            customArgs = new String[]{"-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m"};
+        } else {
+            customArgs = new String[]{"-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m", "-Djmh.executor=CUSTOM",
+                    "-Djmh.executor.class=io.netty.microbench.util.AbstractMicrobenchmark$HarnessExecutor"};
+        }
+        String[] jvmArgs = new String[BASE_JVM_ARGS.length + customArgs.length];
+        System.arraycopy(BASE_JVM_ARGS, 0, jvmArgs, 0, BASE_JVM_ARGS.length);
+        System.arraycopy(customArgs, 0, jvmArgs, BASE_JVM_ARGS.length, customArgs.length);
+        if (disableAssertions) {
+            jvmArgs = removeAssertions(jvmArgs);
+        }
+        this.jvmArgs = jvmArgs;
     }
 
     @Override
     protected String[] jvmArgs() {
-        if (!disableAssertions) {
-            return JVM_ARGS;
-        }
-
-        if (jvmArgsWithNoAssertions == null) {
-            jvmArgsWithNoAssertions = removeAssertions(JVM_ARGS);
-        }
-        return jvmArgsWithNoAssertions;
+        return jvmArgs;
     }
 
     @Override

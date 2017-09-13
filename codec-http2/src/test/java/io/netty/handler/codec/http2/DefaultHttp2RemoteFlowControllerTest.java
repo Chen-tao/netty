@@ -15,17 +15,34 @@
 
 package io.netty.handler.codec.http2;
 
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelConfig;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPromise;
+import io.netty.util.concurrent.EventExecutor;
+import junit.framework.AssertionFailedError;
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static io.netty.handler.codec.http2.Http2CodecUtil.CONNECTION_STREAM_ID;
 import static io.netty.handler.codec.http2.Http2CodecUtil.DEFAULT_PRIORITY_WEIGHT;
 import static io.netty.handler.codec.http2.Http2CodecUtil.DEFAULT_WINDOW_SIZE;
+import static io.netty.handler.codec.http2.Http2CodecUtil.MAX_WEIGHT;
+import static io.netty.handler.codec.http2.Http2CodecUtil.MIN_WEIGHT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -38,23 +55,6 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelConfig;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPromise;
-import io.netty.handler.codec.http2.Http2FrameWriter.Configuration;
-import io.netty.util.concurrent.EventExecutor;
-import junit.framework.AssertionFailedError;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
-
-import java.util.concurrent.atomic.AtomicInteger;
-
 /**
  * Tests for {@link DefaultHttp2RemoteFlowController}.
  */
@@ -65,15 +65,6 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
     private static final int STREAM_D = 7;
 
     private DefaultHttp2RemoteFlowController controller;
-
-    @Mock
-    private ByteBuf buffer;
-
-    @Mock
-    private Http2FrameSizePolicy frameWriterSizePolicy;
-
-    @Mock
-    private Configuration frameWriterConfiguration;
 
     @Mock
     private ChannelHandlerContext ctx;
@@ -125,8 +116,8 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         connection.local().createStream(STREAM_B, false);
         Http2Stream streamC = connection.local().createStream(STREAM_C, false);
         Http2Stream streamD = connection.local().createStream(STREAM_D, false);
-        streamC.setPriority(STREAM_A, DEFAULT_PRIORITY_WEIGHT, false);
-        streamD.setPriority(STREAM_A, DEFAULT_PRIORITY_WEIGHT, false);
+        controller.updateDependencyTree(streamC.id(), STREAM_A, DEFAULT_PRIORITY_WEIGHT, false);
+        controller.updateDependencyTree(streamD.id(), STREAM_A, DEFAULT_PRIORITY_WEIGHT, false);
     }
 
     @Test
@@ -186,13 +177,15 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
     @Test
     public void unflushedPayloadsShouldBeDroppedOnCancel() throws Http2Exception {
         FakeFlowControlled data = new FakeFlowControlled(5);
+        Http2Stream streamA = stream(STREAM_A);
         sendData(STREAM_A, data);
-        connection.stream(STREAM_A).close();
+        streamA.close();
         controller.writePendingBytes();
         data.assertNotWritten();
         controller.writePendingBytes();
         data.assertNotWritten();
-        verify(listener, times(1)).writabilityChanged(stream(STREAM_A));
+        verify(listener, times(1)).writabilityChanged(streamA);
+        assertFalse(controller.isWritable(streamA));
     }
 
     @Test
@@ -716,7 +709,14 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         verify(flowControlled, never()).writeComplete();
 
         assertEquals(90, windowBefore - window(STREAM_A));
-        assertWritabilityChanged(0, true);
+        verify(listener, times(1)).writabilityChanged(stream(STREAM_A));
+        verify(listener, never()).writabilityChanged(stream(STREAM_B));
+        verify(listener, never()).writabilityChanged(stream(STREAM_C));
+        verify(listener, never()).writabilityChanged(stream(STREAM_D));
+        assertFalse(controller.isWritable(stream(STREAM_A)));
+        assertTrue(controller.isWritable(stream(STREAM_B)));
+        assertTrue(controller.isWritable(stream(STREAM_C)));
+        assertTrue(controller.isWritable(stream(STREAM_D)));
     }
 
     @Test
@@ -755,6 +755,7 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
     public void flowControlledWriteCompleteThrowsAnException() throws Exception {
         final Http2RemoteFlowController.FlowControlled flowControlled =
                 mock(Http2RemoteFlowController.FlowControlled.class);
+        Http2Stream streamA = stream(STREAM_A);
         final AtomicInteger size = new AtomicInteger(150);
         doAnswer(new Answer<Integer>() {
             @Override
@@ -780,19 +781,22 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
 
         int windowBefore = window(STREAM_A);
 
-        try {
-            controller.addFlowControlled(stream, flowControlled);
-            controller.writePendingBytes();
-        } catch (Exception e) {
-            fail();
-        }
+        controller.addFlowControlled(stream, flowControlled);
+        controller.writePendingBytes();
 
         verify(flowControlled, times(3)).write(any(ChannelHandlerContext.class), anyInt());
         verify(flowControlled, never()).error(any(ChannelHandlerContext.class), any(Throwable.class));
         verify(flowControlled).writeComplete();
 
         assertEquals(150, windowBefore - window(STREAM_A));
-        assertWritabilityChanged(0, true);
+        verify(listener, times(1)).writabilityChanged(streamA);
+        verify(listener, never()).writabilityChanged(stream(STREAM_B));
+        verify(listener, never()).writabilityChanged(stream(STREAM_C));
+        verify(listener, never()).writabilityChanged(stream(STREAM_D));
+        assertFalse(controller.isWritable(streamA));
+        assertTrue(controller.isWritable(stream(STREAM_B)));
+        assertTrue(controller.isWritable(stream(STREAM_C)));
+        assertTrue(controller.isWritable(stream(STREAM_D)));
     }
 
     @Test
@@ -817,11 +821,11 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         verify(flowControlled).write(any(ChannelHandlerContext.class), anyInt());
         verify(flowControlled).error(any(ChannelHandlerContext.class), any(Throwable.class));
         verify(flowControlled, never()).writeComplete();
-        verify(listener, times(1)).writabilityChanged(stream(STREAM_A));
+        verify(listener, times(1)).writabilityChanged(stream);
         verify(listener, never()).writabilityChanged(stream(STREAM_B));
         verify(listener, never()).writabilityChanged(stream(STREAM_C));
         verify(listener, never()).writabilityChanged(stream(STREAM_D));
-        assertFalse(controller.isWritable(stream(STREAM_A)));
+        assertFalse(controller.isWritable(stream));
         assertTrue(controller.isWritable(stream(STREAM_B)));
         assertTrue(controller.isWritable(stream(STREAM_C)));
         assertTrue(controller.isWritable(stream(STREAM_D)));
@@ -889,6 +893,9 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         // Re-initialize the controller so we can ensure the context hasn't been set yet.
         initConnectionAndController();
 
+        // This should not throw.
+        controller.initialWindowSize(1024 * 100);
+
         FakeFlowControlled dataA = new FakeFlowControlled(1);
         final Http2Stream stream = stream(STREAM_A);
 
@@ -899,6 +906,36 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         // Set the controller
         controller.channelHandlerContext(ctx);
         dataA.assertFullyWritten();
+    }
+
+    @Test(expected = AssertionError.class)
+    public void invalidParentStreamIdThrows() {
+        controller.updateDependencyTree(STREAM_D, -1, DEFAULT_PRIORITY_WEIGHT, true);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void invalidChildStreamIdThrows() {
+        controller.updateDependencyTree(-1, STREAM_D, DEFAULT_PRIORITY_WEIGHT, true);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void connectionChildStreamIdThrows() {
+        controller.updateDependencyTree(0, STREAM_D, DEFAULT_PRIORITY_WEIGHT, true);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void invalidWeightTooSmallThrows() {
+        controller.updateDependencyTree(STREAM_A, STREAM_D, (short) (MIN_WEIGHT - 1), true);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void invalidWeightTooBigThrows() {
+        controller.updateDependencyTree(STREAM_A, STREAM_D, (short) (MAX_WEIGHT + 1), true);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void dependencyOnSelfThrows() {
+        controller.updateDependencyTree(STREAM_A, STREAM_A, DEFAULT_PRIORITY_WEIGHT, true);
     }
 
     private void assertWritabilityChanged(int amt, boolean writable) {
@@ -934,7 +971,7 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         return flowControlled;
     }
 
-    private void sendData(int streamId, FakeFlowControlled data) throws Http2Exception {
+    private void sendData(int streamId, FakeFlowControlled data) {
         Http2Stream stream = stream(streamId);
         controller.addFlowControlled(stream, data);
     }
@@ -943,7 +980,7 @@ public abstract class DefaultHttp2RemoteFlowControllerTest {
         incrementWindowSize(streamId, -window(streamId));
     }
 
-    private int window(int streamId) throws Http2Exception {
+    private int window(int streamId) {
         return controller.windowSize(stream(streamId));
     }
 

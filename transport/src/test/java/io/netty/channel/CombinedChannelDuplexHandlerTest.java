@@ -76,7 +76,7 @@ public class CombinedChannelDuplexHandlerTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testOutboundHandlerImplementsInbboundHandler() {
+    public void testOutboundHandlerImplementsInboundHandler() {
         new CombinedChannelDuplexHandler<ChannelInboundHandler, ChannelOutboundHandler>(
                 new ChannelInboundHandlerAdapter(), new ChannelDuplexHandler());
     }
@@ -320,5 +320,81 @@ public class CombinedChannelDuplexHandlerTest {
         channel.pipeline().disconnect();
         channel.pipeline().close();
         channel.pipeline().deregister();
+    }
+
+    @Test(timeout = 3000)
+    public void testPromisesPassed() {
+        ChannelOutboundHandler outboundHandler = new ChannelOutboundHandlerAdapter() {
+            @Override
+            public void bind(ChannelHandlerContext ctx, SocketAddress localAddress,
+                             ChannelPromise promise) throws Exception {
+                promise.setSuccess();
+            }
+
+            @Override
+            public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress,
+                                SocketAddress localAddress, ChannelPromise promise) throws Exception {
+                promise.setSuccess();
+            }
+
+            @Override
+            public void disconnect(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
+                promise.setSuccess();
+            }
+
+            @Override
+            public void close(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
+                promise.setSuccess();
+            }
+
+            @Override
+            public void deregister(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
+                promise.setSuccess();
+            }
+
+            @Override
+            public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+                promise.setSuccess();
+            }
+        };
+        EmbeddedChannel ch = new EmbeddedChannel(outboundHandler,
+                new CombinedChannelDuplexHandler<ChannelInboundHandler, ChannelOutboundHandler>(
+                        new ChannelInboundHandlerAdapter(), new ChannelOutboundHandlerAdapter()));
+        ChannelPipeline pipeline = ch.pipeline();
+
+        ChannelPromise promise = ch.newPromise();
+        pipeline.connect(new InetSocketAddress(0), null, promise);
+        promise.syncUninterruptibly();
+
+        promise = ch.newPromise();
+        pipeline.bind(new InetSocketAddress(0), promise);
+        promise.syncUninterruptibly();
+
+        promise = ch.newPromise();
+        pipeline.close(promise);
+        promise.syncUninterruptibly();
+
+        promise = ch.newPromise();
+        pipeline.disconnect(promise);
+        promise.syncUninterruptibly();
+
+        promise = ch.newPromise();
+        pipeline.write("test", promise);
+        promise.syncUninterruptibly();
+
+        promise = ch.newPromise();
+        pipeline.deregister(promise);
+        promise.syncUninterruptibly();
+        ch.finish();
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testNotSharable() {
+        new CombinedChannelDuplexHandler<ChannelInboundHandler, ChannelOutboundHandler>() {
+            @Override
+            public boolean isSharable() {
+                return true;
+            }
+        };
     }
 }

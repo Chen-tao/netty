@@ -76,7 +76,7 @@ public class BinaryMemcacheObjectAggregatorTest {
 
         assertThat(channel.readInbound(), nullValue());
 
-        channel.finish();
+        assertFalse(channel.finish());
     }
 
     @Test
@@ -86,17 +86,15 @@ public class BinaryMemcacheObjectAggregatorTest {
                 new BinaryMemcacheRequestDecoder(),
                 new BinaryMemcacheObjectAggregator(MAX_CONTENT_SIZE));
 
-        String key = "Netty";
+        ByteBuf key = Unpooled.copiedBuffer("Netty", CharsetUtil.UTF_8);
         ByteBuf extras = Unpooled.copiedBuffer("extras", CharsetUtil.UTF_8);
         BinaryMemcacheRequest request = new DefaultBinaryMemcacheRequest(key, extras);
-        request.setKeyLength((short) key.length());
-        request.setExtrasLength((byte) extras.readableBytes());
 
         DefaultMemcacheContent content1 =
                 new DefaultMemcacheContent(Unpooled.copiedBuffer("Netty", CharsetUtil.UTF_8));
         DefaultLastMemcacheContent content2 =
                 new DefaultLastMemcacheContent(Unpooled.copiedBuffer(" Rocks!", CharsetUtil.UTF_8));
-        int totalBodyLength = key.length() + extras.readableBytes() +
+        int totalBodyLength = key.readableBytes() + extras.readableBytes() +
                 content1.content().readableBytes() + content2.content().readableBytes();
         request.setTotalBodyLength(totalBodyLength);
 
@@ -107,7 +105,7 @@ public class BinaryMemcacheObjectAggregatorTest {
 
         FullBinaryMemcacheRequest read = channel.readInbound();
         assertThat(read, notNullValue());
-        assertThat(read.key(), is("Netty"));
+        assertThat(read.key().toString(CharsetUtil.UTF_8), is("Netty"));
         assertThat(read.extras().toString(CharsetUtil.UTF_8), is("extras"));
         assertThat(read.content().toString(CharsetUtil.UTF_8), is("Netty Rocks!"));
 

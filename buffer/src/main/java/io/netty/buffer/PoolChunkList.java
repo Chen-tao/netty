@@ -23,12 +23,15 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
+import static java.lang.Math.*;
+
 final class PoolChunkList<T> implements PoolChunkListMetric {
     private static final Iterator<PoolChunkMetric> EMPTY_METRICS = Collections.<PoolChunkMetric>emptyList().iterator();
+    private final PoolArena<T> arena;
     private final PoolChunkList<T> nextList;
     private final int minUsage;
     private final int maxUsage;
-
+    private final int maxCapacity;
     private PoolChunk<T> head;
 
     // This is only update once when create the linked like list of PoolChunkList in PoolArena constructor.
@@ -37,10 +40,33 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
     // TODO: Test if adding padding helps under contention
     //private long pad0, pad1, pad2, pad3, pad4, pad5, pad6, pad7;
 
-    PoolChunkList(PoolChunkList<T> nextList, int minUsage, int maxUsage) {
+    PoolChunkList(PoolArena<T> arena, PoolChunkList<T> nextList, int minUsage, int maxUsage, int chunkSize) {
+        assert minUsage <= maxUsage;
+        this.arena = arena;
         this.nextList = nextList;
         this.minUsage = minUsage;
         this.maxUsage = maxUsage;
+        maxCapacity = calculateMaxCapacity(minUsage, chunkSize);
+    }
+
+    /**
+     * Calculates the maximum capacity of a buffer that will ever be possible to allocate out of the {@link PoolChunk}s
+     * that belong to the {@link PoolChunkList} with the given {@code minUsage} and {@code maxUsage} settings.
+     */
+    private static int calculateMaxCapacity(int minUsage, int chunkSize) {
+        minUsage = minUsage0(minUsage);
+
+        if (minUsage == 100) {
+            // If the minUsage is 100 we can not allocate anything out of this list.
+            return 0;
+        }
+
+        // Calculate the maximum amount of bytes that can be allocated from a PoolChunk in this PoolChunkList.
+        //
+        // As an example:
+        // - If a PoolChunkList has minUsage == 25 we are allowed to allocate at most 75% of the chunkSize because
+        //   this is the maximum amount available in any PoolChunk in this PoolChunkList.
+        return  (int) (chunkSize * (100L - minUsage) / 100L);
     }
 
     void prevList(PoolChunkList<T> prevList) {
@@ -49,7 +75,9 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
     }
 
     boolean allocate(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
-        if (head == null) {
+        if (head == null || normCapacity > maxCapacity) {
+            // Either this PoolChunkList is empty or the requested capacity is larger then the capacity which can
+            // be handled by the PoolChunks that are contained in this PoolChunkList.
             return false;
         }
 
@@ -75,15 +103,37 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
         chunk.free(handle);
         if (chunk.usage() < minUsage) {
             remove(chunk);
-            if (prevList == null) {
-                assert chunk.usage() == 0;
-                return false;
-            } else {
-                prevList.add(chunk);
-                return true;
-            }
+            // Move the PoolChunk down the PoolChunkList linked-list.
+            return move0(chunk);
         }
         return true;
+    }
+
+    private boolean move(PoolChunk<T> chunk) {
+        assert chunk.usage() < maxUsage;
+
+        if (chunk.usage() < minUsage) {
+            // Move the PoolChunk down the PoolChunkList linked-list.
+            return move0(chunk);
+        }
+
+        // PoolChunk fits into this PoolChunkList, adding it here.
+        add0(chunk);
+        return true;
+    }
+
+    /**
+     * Moves the {@link PoolChunk} down the {@link PoolChunkList} linked-list so it will end up in the right
+     * {@link PoolChunkList} that has the correct minUsage / maxUsage in respect to {@link PoolChunk#usage()}.
+     */
+    private boolean move0(PoolChunk<T> chunk) {
+        if (prevList == null) {
+            // There is no previous PoolChunkList so return false which result in having the PoolChunk destroyed and
+            // all memory associated with the PoolChunk will be released.
+            assert chunk.usage() == 0;
+            return false;
+        }
+        return prevList.move(chunk);
     }
 
     void add(PoolChunk<T> chunk) {
@@ -91,7 +141,13 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
             nextList.add(chunk);
             return;
         }
+        add0(chunk);
+    }
 
+    /**
+     * Adds the {@link PoolChunk} to this {@link PoolChunkList}.
+     */
+    void add0(PoolChunk<T> chunk) {
         chunk.parent = this;
         if (head == null) {
             head = chunk;
@@ -122,46 +178,62 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
 
     @Override
     public int minUsage() {
-        return minUsage;
+        return minUsage0(minUsage);
     }
 
     @Override
     public int maxUsage() {
-        return maxUsage;
+        return min(maxUsage, 100);
+    }
+
+    private static int minUsage0(int value) {
+        return max(1, value);
     }
 
     @Override
     public Iterator<PoolChunkMetric> iterator() {
-        if (head == null) {
-            return EMPTY_METRICS;
-        }
-        List<PoolChunkMetric> metrics = new ArrayList<PoolChunkMetric>();
-        for (PoolChunk<T> cur = head;;) {
-            metrics.add(cur);
-            cur = cur.next;
-            if (cur == null) {
-                break;
+        synchronized (arena) {
+            if (head == null) {
+                return EMPTY_METRICS;
             }
+            List<PoolChunkMetric> metrics = new ArrayList<PoolChunkMetric>();
+            for (PoolChunk<T> cur = head;;) {
+                metrics.add(cur);
+                cur = cur.next;
+                if (cur == null) {
+                    break;
+                }
+            }
+            return metrics.iterator();
         }
-        return metrics.iterator();
     }
 
     @Override
     public String toString() {
-        if (head == null) {
-            return "none";
-        }
-
         StringBuilder buf = new StringBuilder();
-        for (PoolChunk<T> cur = head;;) {
-            buf.append(cur);
-            cur = cur.next;
-            if (cur == null) {
-                break;
+        synchronized (arena) {
+            if (head == null) {
+                return "none";
             }
-            buf.append(StringUtil.NEWLINE);
-        }
 
+            for (PoolChunk<T> cur = head;;) {
+                buf.append(cur);
+                cur = cur.next;
+                if (cur == null) {
+                    break;
+                }
+                buf.append(StringUtil.NEWLINE);
+            }
+        }
         return buf.toString();
+    }
+
+    void destroy(PoolArena<T> arena) {
+        PoolChunk<T> chunk = head;
+        while (chunk != null) {
+            arena.destroyChunk(chunk);
+            chunk = chunk.next;
+        }
+        head = null;
     }
 }

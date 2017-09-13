@@ -16,19 +16,43 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Encodes {@link Http2Headers} into HPACK-encoded headers blocks.
  */
+@UnstableApi
 public interface Http2HeadersEncoder {
     /**
      * Configuration related elements for the {@link Http2HeadersEncoder} interface
      */
     interface Configuration {
         /**
-         * Access the Http2HeaderTable for this {@link Http2HeadersEncoder}
+         * Represents the value for
+         * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_HEADER_TABLE_SIZE</a>.
+         * This method should only be called by Netty (not users) as a result of a receiving a {@code SETTINGS} frame.
          */
-        Http2HeaderTable headerTable();
+        void maxHeaderTableSize(long max) throws Http2Exception;
+
+        /**
+         * Represents the value for
+         * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_HEADER_TABLE_SIZE</a>.
+         * The initial value returned by this method must be {@link Http2CodecUtil#DEFAULT_HEADER_TABLE_SIZE}.
+         */
+        long maxHeaderTableSize();
+
+        /**
+         * Represents the value for
+         * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>.
+         * This method should only be called by Netty (not users) as a result of a receiving a {@code SETTINGS} frame.
+         */
+        void maxHeaderListSize(long max) throws Http2Exception;
+
+        /**
+         * Represents the value for
+         * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>.
+         */
+        long maxHeaderListSize();
     }
 
     /**
@@ -52,10 +76,11 @@ public interface Http2HeadersEncoder {
     /**
      * Encodes the given headers and writes the output headers block to the given output buffer.
      *
+     * @param streamId  the identifier of the stream for which the headers are encoded.
      * @param headers the headers to be encoded.
      * @param buffer the buffer to receive the encoded headers.
      */
-    void encodeHeaders(Http2Headers headers, ByteBuf buffer) throws Http2Exception;
+    void encodeHeaders(int streamId, Http2Headers headers, ByteBuf buffer) throws Http2Exception;
 
     /**
      * Get the {@link Configuration} for this {@link Http2HeadersEncoder}

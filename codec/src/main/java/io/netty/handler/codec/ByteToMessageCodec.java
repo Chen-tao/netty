@@ -49,14 +49,14 @@ public abstract class ByteToMessageCodec<I> extends ChannelDuplexHandler {
     };
 
     /**
-     * @see {@link #ByteToMessageCodec(boolean)} with {@code true} as boolean parameter.
+     * see {@link #ByteToMessageCodec(boolean)} with {@code true} as boolean parameter.
      */
     protected ByteToMessageCodec() {
         this(true);
     }
 
     /**
-     * @see {@link #ByteToMessageCodec(Class, boolean)} with {@code true} as boolean value.
+     * see {@link #ByteToMessageCodec(Class, boolean)} with {@code true} as boolean value.
      */
     protected ByteToMessageCodec(Class<? extends I> outboundMessageType) {
         this(outboundMessageType, true);
@@ -70,7 +70,7 @@ public abstract class ByteToMessageCodec<I> extends ChannelDuplexHandler {
      *                              {@link ByteBuf}, which is backed by an byte array.
      */
     protected ByteToMessageCodec(boolean preferDirect) {
-        CodecUtil.ensureNotSharable(this);
+        ensureNotSharable();
         outboundMsgMatcher = TypeParameterMatcher.find(this, ByteToMessageCodec.class, "I");
         encoder = new Encoder(preferDirect);
     }
@@ -84,7 +84,7 @@ public abstract class ByteToMessageCodec<I> extends ChannelDuplexHandler {
      *                              {@link ByteBuf}, which is backed by an byte array.
      */
     protected ByteToMessageCodec(Class<? extends I> outboundMessageType, boolean preferDirect) {
-        CodecUtil.ensureNotSharable(this);
+        ensureNotSharable();
         outboundMsgMatcher = TypeParameterMatcher.get(outboundMessageType);
         encoder = new Encoder(preferDirect);
     }
@@ -150,7 +150,11 @@ public abstract class ByteToMessageCodec<I> extends ChannelDuplexHandler {
      * @see ByteToMessageDecoder#decodeLast(ChannelHandlerContext, ByteBuf, List)
      */
     protected void decodeLast(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
-        decode(ctx, in, out);
+        if (in.isReadable()) {
+            // Only call decode() if there is something left in the buffer to decode.
+            // See https://github.com/netty/netty/issues/4386
+            decode(ctx, in, out);
+        }
     }
 
     private final class Encoder extends MessageToByteEncoder<I> {

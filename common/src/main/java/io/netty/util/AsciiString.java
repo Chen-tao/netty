@@ -17,13 +17,13 @@ package io.netty.util;
 
 import io.netty.util.ByteProcessor.IndexOfProcessor;
 import io.netty.util.internal.EmptyArrays;
+import io.netty.util.internal.InternalThreadLocalMap;
 import io.netty.util.internal.PlatformDependent;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -37,7 +37,7 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
  * A string which has been encoded into a character encoding whose character always takes a single byte, similarly to
  * ASCII. It internally keeps its content in a byte array unlike {@link String}, which uses a character array, for
  * reduced memory footprint and faster data transfer from/to byte-based data structures such as a byte array and
- * {@link ByteBuffer}. It is often used in conjunction with {@link Headers} that require a {@link CharSequence}.
+ * {@link ByteBuffer}. It is often used in conjunction with {@code Headers} that require a {@link CharSequence}.
  * <p>
  * This class was designed to provide an immutable array of bytes, and caches some internal state based upon the value
  * of this array. However underlying access to this byte array is provided via not copying the array on construction or
@@ -45,7 +45,7 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
  * {@link #arrayChanged()} so the state of this class can be reset.
  */
 public final class AsciiString implements CharSequence, Comparable<CharSequence> {
-    public static final AsciiString EMPTY_STRING = new AsciiString("");
+    public static final AsciiString EMPTY_STRING = cached("");
     private static final char MAX_CHAR_VALUE = 255;
 
     public static final int INDEX_NOT_FOUND = -1;
@@ -194,7 +194,7 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
      */
     public AsciiString(char[] value, Charset charset, int start, int length) {
         CharBuffer cbuf = CharBuffer.wrap(value, start, length);
-        CharsetEncoder encoder = CharsetUtil.getEncoder(charset);
+        CharsetEncoder encoder = CharsetUtil.encoder(charset);
         ByteBuffer nativeBuffer = ByteBuffer.allocate((int) (encoder.maxBytesPerChar() * length));
         encoder.encode(cbuf, nativeBuffer, true);
         final int bufferOffset = nativeBuffer.arrayOffset();
@@ -241,7 +241,7 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
      */
     public AsciiString(CharSequence value, Charset charset, int start, int length) {
         CharBuffer cbuf = CharBuffer.wrap(value, start, start + length);
-        CharsetEncoder encoder = CharsetUtil.getEncoder(charset);
+        CharsetEncoder encoder = CharsetUtil.encoder(charset);
         ByteBuffer nativeBuffer = ByteBuffer.allocate((int) (encoder.maxBytesPerChar() * length));
         encoder.encode(cbuf, nativeBuffer, true);
         final int offset = nativeBuffer.arrayOffset();
@@ -714,6 +714,34 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
     }
 
     /**
+     * Searches in this string for the index of the specified char {@code ch}.
+     * The search for the char starts at the specified offset {@code start} and moves towards the end of this string.
+     *
+     * @param ch the char to find.
+     * @param start the starting offset.
+     * @return the index of the first occurrence of the specified char {@code ch} in this string,
+     * -1 if found no occurrence.
+     */
+    public int indexOf(char ch, int start) {
+        if (start < 0) {
+            start = 0;
+        }
+
+        final int thisLen = length();
+
+        if (ch > MAX_CHAR_VALUE) {
+            return -1;
+        }
+
+        try {
+            return forEachByte(start, thisLen - start, new IndexOfProcessor((byte) ch));
+        } catch (Exception e) {
+            PlatformDependent.throwException(e);
+            return -1;
+        }
+    }
+
+    /**
      * Searches in this string for the last index of the specified string. The search for the string starts at the end
      * and moves towards the beginning of this string.
      *
@@ -1050,7 +1078,7 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
      * Splits the specified {@link String} with the specified delimiter..
      */
     public AsciiString[] split(char delim) {
-        final List<AsciiString> res = new ArrayList<AsciiString>();
+        final List<AsciiString> res = InternalThreadLocalMap.get().arrayList();
 
         int start = 0;
         final int length = length();
@@ -1093,10 +1121,12 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
      */
     @Override
     public int hashCode() {
-        if (hash == 0) {
-            hash = PlatformDependent.hashCodeAscii(value, offset, length);
+        int h = hash;
+        if (h == 0) {
+            h = PlatformDependent.hashCodeAscii(value, offset, length);
+            hash = h;
         }
-        return hash;
+        return h;
     }
 
     @Override
@@ -1116,20 +1146,21 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
 
     /**
      * Translates the entire byte string to a {@link String}.
-     * @see {@link #toString(int)}
+     * @see #toString(int)
      */
     @Override
     public String toString() {
-        if (string != null) {
-            return string;
+        String cache = string;
+        if (cache == null) {
+            cache = toString(0);
+            string = cache;
         }
-        string = toString(0);
-        return string;
+        return cache;
     }
 
     /**
      * Translates the entire byte string to a {@link String} using the {@code charset} encoding.
-     * @see {@link #toString(int, int)}
+     * @see #toString(int, int)
      */
     public String toString(int start) {
         return toString(start, length());
@@ -1357,6 +1388,18 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
     }
 
     /**
+     * Returns an {@link AsciiString} containing the given string and retains/caches the input
+     * string for later use in {@link #toString()}.
+     * Used for the constants (which already stored in the JVM's string table) and in cases
+     * where the guaranteed use of the {@link #toString()} method.
+     */
+    public static AsciiString cached(String string) {
+        AsciiString asciiString = new AsciiString(string);
+        asciiString.string = string;
+        return asciiString;
+    }
+
+    /**
      * Returns the case-insensitive hash code of the specified string. Note that this method uses the same hashing
      * algorithm with {@link #hashCode()} so that you can put both {@link AsciiString}s and arbitrary
      * {@link CharSequence}s into the same headers.
@@ -1366,7 +1409,7 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
             return 0;
         }
         if (value.getClass() == AsciiString.class) {
-            return ((AsciiString) value).hashCode();
+            return value.hashCode();
         }
 
         return PlatformDependent.hashCodeAscii(value);
@@ -1662,7 +1705,6 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
      * @param startPos  the start position, negative treated as zero
      * @return the first index of the search CharSequence (always &ge; startPos),
      *  -1 if no match or {@code null} string input
-     * @throws NullPointerException if {@code cs} or {@code string} is {@code null}.
      */
     public static int indexOfIgnoreCase(final CharSequence str, final CharSequence searchStr, int startPos) {
         if (str == null || searchStr == null) {
@@ -1716,7 +1758,6 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
      * @param startPos  the start position, negative treated as zero
      * @return the first index of the search CharSequence (always &ge; startPos),
      *  -1 if no match or {@code null} string input
-     * @throws NullPointerException if {@code cs} or {@code string} is {@code null}.
      */
     public static int indexOfIgnoreCaseAscii(final CharSequence str, final CharSequence searchStr, int startPos) {
         if (str == null || searchStr == null) {
@@ -1735,6 +1776,38 @@ public final class AsciiString implements CharSequence, Comparable<CharSequence>
         }
         for (int i = startPos; i < endLimit; i++) {
             if (regionMatchesAscii(str, true, i, searchStr, 0, searchStrLen)) {
+                return i;
+            }
+        }
+        return INDEX_NOT_FOUND;
+    }
+
+    /**
+     * <p>Finds the first index in the {@code CharSequence} that matches the
+     * specified character.</p>
+     *
+     * @param cs  the {@code CharSequence} to be processed, not null
+     * @param searchChar the char to be searched for
+     * @param start  the start index, negative starts at the string start
+     * @return the index where the search char was found,
+     * -1 if char {@code searchChar} is not found or {@code cs == null}
+     */
+    //-----------------------------------------------------------------------
+    public static int indexOf(final CharSequence cs, final char searchChar, int start) {
+        if (cs instanceof String) {
+            return ((String) cs).indexOf(searchChar, start);
+        } else if (cs instanceof AsciiString) {
+            return ((AsciiString) cs).indexOf(searchChar, start);
+        }
+        if (cs == null) {
+            return INDEX_NOT_FOUND;
+        }
+        final int sz = cs.length();
+        if (start < 0) {
+            start = 0;
+        }
+        for (int i = start; i < sz; i++) {
+            if (cs.charAt(i) == searchChar) {
                 return i;
             }
         }

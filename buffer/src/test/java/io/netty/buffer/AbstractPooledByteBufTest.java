@@ -17,58 +17,46 @@ package io.netty.buffer;
 
 import org.junit.Test;
 
-import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 public abstract class AbstractPooledByteBufTest extends AbstractByteBufTest {
 
-    protected abstract ByteBuf alloc(int length);
+    protected abstract ByteBuf alloc(int length, int maxCapacity);
 
     @Override
-    protected ByteBuf newBuffer(int length) {
-        ByteBuf buffer = alloc(length);
+    protected ByteBuf newBuffer(int length, int maxCapacity) {
+        ByteBuf buffer = alloc(length, maxCapacity);
+
+        // Testing if the writerIndex and readerIndex are correct when allocate and also after we reset the mark.
+        assertEquals(0, buffer.writerIndex());
+        assertEquals(0, buffer.readerIndex());
+        buffer.resetReaderIndex();
+        buffer.resetWriterIndex();
         assertEquals(0, buffer.writerIndex());
         assertEquals(0, buffer.readerIndex());
         return buffer;
     }
 
     @Test
-    public void testDiscardMarks() {
-        testDiscardMarks(4);
+    public void ensureWritableWithEnoughSpaceShouldNotThrow() {
+        ByteBuf buf = newBuffer(1, 10);
+        buf.ensureWritable(3);
+        assertThat(buf.writableBytes(), is(greaterThanOrEqualTo(3)));
+        buf.release();
     }
 
-    @Test
-    public void testDiscardMarksUnpooled() {
-        testDiscardMarks(32 * 1024 * 1024);
-    }
-
-    private void testDiscardMarks(int capacity) {
-        ByteBuf buf = newBuffer(capacity);
-        buf.writeShort(1);
-
-        buf.skipBytes(1);
-
-        buf.markReaderIndex();
-        buf.markWriterIndex();
-        assertTrue(buf.release());
-
-        ByteBuf buf2 = newBuffer(capacity);
-
-        assertSame(unwrapIfNeeded(buf), unwrapIfNeeded(buf2));
-
-        buf2.writeShort(1);
-
-        buf2.resetReaderIndex();
-        buf2.resetWriterIndex();
-
-        assertEquals(0, buf2.readerIndex());
-        assertEquals(0, buf2.writerIndex());
-        assertTrue(buf2.release());
-    }
-
-    private static ByteBuf unwrapIfNeeded(ByteBuf buf) {
-        if (buf instanceof AdvancedLeakAwareByteBuf || buf instanceof SimpleLeakAwareByteBuf) {
-            return buf.unwrap();
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void ensureWritableWithNotEnoughSpaceShouldThrow() {
+        ByteBuf buf = newBuffer(1, 10);
+        try {
+            buf.ensureWritable(11);
+            fail();
+        } finally {
+            buf.release();
         }
-        return buf;
     }
 }

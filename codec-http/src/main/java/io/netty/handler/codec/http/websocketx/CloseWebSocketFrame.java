@@ -18,7 +18,7 @@ package io.netty.handler.codec.http.websocketx;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.CharsetUtil;
-import io.netty.util.internal.EmptyArrays;
+import io.netty.util.internal.StringUtil;
 
 /**
  * Web Socket Frame for closing the connection
@@ -75,15 +75,14 @@ public class CloseWebSocketFrame extends WebSocketFrame {
     }
 
     private static ByteBuf newBinaryData(int statusCode, String reasonText) {
-        byte[] reasonBytes = EmptyArrays.EMPTY_BYTES;
-        if (reasonText != null) {
-            reasonBytes = reasonText.getBytes(CharsetUtil.UTF_8);
+        if (reasonText == null) {
+            reasonText = StringUtil.EMPTY_STRING;
         }
 
-        ByteBuf binaryData = Unpooled.buffer(2 + reasonBytes.length);
+        ByteBuf binaryData = Unpooled.buffer(2 + reasonText.length());
         binaryData.writeShort(statusCode);
-        if (reasonBytes.length > 0) {
-            binaryData.writeBytes(reasonBytes);
+        if (!reasonText.isEmpty()) {
+            binaryData.writeCharSequence(reasonText, CharsetUtil.UTF_8);
         }
 
         binaryData.readerIndex(0);
@@ -140,12 +139,22 @@ public class CloseWebSocketFrame extends WebSocketFrame {
 
     @Override
     public CloseWebSocketFrame copy() {
-        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content().copy());
+        return (CloseWebSocketFrame) super.copy();
     }
 
     @Override
     public CloseWebSocketFrame duplicate() {
-        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content().duplicate());
+        return (CloseWebSocketFrame) super.duplicate();
+    }
+
+    @Override
+    public CloseWebSocketFrame retainedDuplicate() {
+        return (CloseWebSocketFrame) super.retainedDuplicate();
+    }
+
+    @Override
+    public CloseWebSocketFrame replace(ByteBuf content) {
+        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content);
     }
 
     @Override

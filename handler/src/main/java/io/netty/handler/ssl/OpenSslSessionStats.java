@@ -16,18 +16,24 @@
 
 package io.netty.handler.ssl;
 
-import org.apache.tomcat.jni.SSLContext;
+import io.netty.internal.tcnative.SSLContext;
+
+import java.util.concurrent.locks.Lock;
 
 /**
  * Stats exposed by an OpenSSL session context.
  *
- * @see <a href="https://www.openssl.org/docs/ssl/SSL_CTX_sess_number.html"><code>SSL_CTX_sess_number</code></a>
+ * @see <a href="https://www.openssl.org/docs/manmaster/man3/SSL_CTX_sess_number.html">SSL_CTX_sess_number</a>
  */
 public final class OpenSslSessionStats {
 
-    private final long context;
+    private final ReferenceCountedOpenSslContext context;
 
-    OpenSslSessionStats(long context) {
+    // IMPORTANT: We take the OpenSslContext and not just the long (which points the native instance) to prevent
+    //            the GC to collect OpenSslContext as this would also free the pointer and so could result in a
+    //            segfault when the user calls any of the methods here that try to pass the pointer down to the native
+    //            level.
+    OpenSslSessionStats(ReferenceCountedOpenSslContext context) {
         this.context = context;
     }
 
@@ -35,49 +41,91 @@ public final class OpenSslSessionStats {
      * Returns the current number of sessions in the internal session cache.
      */
     public long number() {
-        return SSLContext.sessionNumber(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionNumber(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of started SSL/TLS handshakes in client mode.
      */
     public long connect() {
-        return SSLContext.sessionConnect(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionConnect(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of successfully established SSL/TLS sessions in client mode.
      */
     public long connectGood() {
-        return SSLContext.sessionConnectGood(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionConnectGood(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of start renegotiations in client mode.
      */
     public long connectRenegotiate() {
-        return SSLContext.sessionConnectRenegotiate(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionConnectRenegotiate(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of started SSL/TLS handshakes in server mode.
      */
     public long accept() {
-        return SSLContext.sessionAccept(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionAccept(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of successfully established SSL/TLS sessions in server mode.
      */
     public long acceptGood() {
-        return SSLContext.sessionAcceptGood(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionAcceptGood(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of start renegotiations in server mode.
      */
     public long acceptRenegotiate() {
-        return SSLContext.sessionAcceptRenegotiate(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionAcceptRenegotiate(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
@@ -86,14 +134,26 @@ public final class OpenSslSessionStats {
      * external cache is counted as a hit.
      */
     public long hits() {
-        return SSLContext.sessionHits(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionHits(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of successfully retrieved sessions from the external session cache in server mode.
      */
     public long cbHits() {
-        return SSLContext.sessionCbHits(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionCbHits(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
@@ -101,7 +161,13 @@ public final class OpenSslSessionStats {
      * in server mode.
      */
     public long misses() {
-        return SSLContext.sessionMisses(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionMisses(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
@@ -110,13 +176,78 @@ public final class OpenSslSessionStats {
      * count.
      */
     public long timeouts() {
-        return SSLContext.sessionTimeouts(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionTimeouts(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 
     /**
      * Returns the number of sessions that were removed because the maximum session cache size was exceeded.
      */
     public long cacheFull() {
-        return SSLContext.sessionCacheFull(context);
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionCacheFull(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
+    }
+
+    /**
+     * Returns the number of times a client presented a ticket that did not match any key in the list.
+     */
+    public long ticketKeyFail() {
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionTicketKeyFail(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
+    }
+
+    /**
+     * Returns the number of times a client did not present a ticket and we issued a new one
+     */
+    public long ticketKeyNew() {
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionTicketKeyNew(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
+    }
+
+    /**
+     * Returns the number of times a client presented a ticket derived from an older key,
+     * and we upgraded to the primary key.
+     */
+    public long ticketKeyRenew() {
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionTicketKeyRenew(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
+    }
+
+    /**
+     * Returns the number of times a client presented a ticket derived from the primary key.
+     */
+    public long ticketKeyResume() {
+        Lock readerLock = context.ctxLock.readLock();
+        readerLock.lock();
+        try {
+            return SSLContext.sessionTicketKeyResume(context.ctx);
+        } finally {
+            readerLock.unlock();
+        }
     }
 }

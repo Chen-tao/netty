@@ -17,6 +17,7 @@ package io.netty.handler.codec.http2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.internal.UnstableApi;
 
 import java.io.Closeable;
 
@@ -24,15 +25,16 @@ import java.io.Closeable;
  * Reads HTTP/2 frames from an input {@link ByteBuf} and notifies the specified
  * {@link Http2FrameListener} when frames are complete.
  */
+@UnstableApi
 public interface Http2FrameReader extends Closeable {
     /**
      * Configuration specific to {@link Http2FrameReader}
      */
     interface Configuration {
         /**
-         * Get the {@link Http2HeaderTable} for this {@link Http2FrameReader}
+         * Get the {@link Http2HeadersDecoder.Configuration} for this {@link Http2FrameReader}
          */
-        Http2HeaderTable headerTable();
+        Http2HeadersDecoder.Configuration headersConfiguration();
 
         /**
          * Get the {@link Http2FrameSizePolicy} for this {@link Http2FrameReader}

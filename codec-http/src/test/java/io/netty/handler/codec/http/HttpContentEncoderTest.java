@@ -30,7 +30,10 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 public class HttpContentEncoderTest {
 
@@ -158,13 +161,40 @@ public class HttpContentEncoderTest {
     }
 
     @Test
+    public void testFullContentWithContentLength() throws Exception {
+        EmbeddedChannel ch = new EmbeddedChannel(new TestEncoder());
+        ch.writeInbound(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/"));
+
+        FullHttpResponse fullRes = new DefaultFullHttpResponse(
+                HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(new byte[42]));
+        fullRes.headers().set(HttpHeaderNames.CONTENT_LENGTH, 42);
+        ch.writeOutbound(fullRes);
+
+        HttpResponse res = ch.readOutbound();
+        assertThat(res, is(not(instanceOf(HttpContent.class))));
+        assertThat(res.headers().get(HttpHeaderNames.TRANSFER_ENCODING), is(nullValue()));
+        assertThat(res.headers().get(HttpHeaderNames.CONTENT_LENGTH), is("2"));
+        assertThat(res.headers().get(HttpHeaderNames.CONTENT_ENCODING), is("test"));
+
+        HttpContent c = ch.readOutbound();
+        assertThat(c.content().readableBytes(), is(2));
+        assertThat(c.content().toString(CharsetUtil.US_ASCII), is("42"));
+        c.release();
+
+        LastHttpContent last = ch.readOutbound();
+        assertThat(last.content().readableBytes(), is(0));
+        last.release();
+
+        assertThat(ch.readOutbound(), is(nullValue()));
+    }
+
+    @Test
     public void testFullContent() throws Exception {
         EmbeddedChannel ch = new EmbeddedChannel(new TestEncoder());
         ch.writeInbound(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/"));
 
         FullHttpResponse res = new DefaultFullHttpResponse(
-                HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(new byte[42]));
-        res.headers().set(HttpHeaderNames.CONTENT_LENGTH, 42);
+            HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(new byte[42]));
         ch.writeOutbound(res);
 
         assertEncodedResponse(ch);
@@ -330,6 +360,31 @@ public class HttpContentEncoderTest {
         assertThat(chunk, is(instanceOf(LastHttpContent.class)));
         chunk.release();
         assertThat(ch.readOutbound(), is(nullValue()));
+    }
+
+    @Test
+    public void testHttp1_0() throws Exception {
+        EmbeddedChannel ch = new EmbeddedChannel(new TestEncoder());
+        FullHttpRequest req = new DefaultFullHttpRequest(HttpVersion.HTTP_1_0, HttpMethod.GET, "/");
+        assertTrue(ch.writeInbound(req));
+
+        HttpResponse res = new DefaultHttpResponse(HttpVersion.HTTP_1_0, HttpResponseStatus.OK);
+        res.headers().set(HttpHeaderNames.CONTENT_LENGTH, HttpHeaderValues.ZERO);
+        assertTrue(ch.writeOutbound(res));
+        assertTrue(ch.writeOutbound(LastHttpContent.EMPTY_LAST_CONTENT));
+        assertTrue(ch.finish());
+
+        FullHttpRequest request = ch.readInbound();
+        assertTrue(request.release());
+        assertNull(ch.readInbound());
+
+        HttpResponse response = ch.readOutbound();
+        assertSame(res, response);
+
+        LastHttpContent content = ch.readOutbound();
+        assertSame(LastHttpContent.EMPTY_LAST_CONTENT, content);
+        content.release();
+        assertNull(ch.readOutbound());
     }
 
     private static void assertEmptyResponse(EmbeddedChannel ch) {

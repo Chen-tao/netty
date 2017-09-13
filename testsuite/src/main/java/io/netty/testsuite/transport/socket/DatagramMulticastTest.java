@@ -25,6 +25,7 @@ import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.oio.OioDatagramChannel;
 import io.netty.util.NetUtil;
+import io.netty.util.internal.SocketUtils;
 import org.junit.Test;
 
 import java.net.InetSocketAddress;
@@ -56,9 +57,12 @@ public class DatagramMulticastTest extends AbstractDatagramTest {
         sb.option(ChannelOption.SO_REUSEADDR, true);
         cb.option(ChannelOption.IP_MULTICAST_IF, NetUtil.LOOPBACK_IF);
         cb.option(ChannelOption.SO_REUSEADDR, true);
+
+        Channel sc = sb.bind(newSocketAddress()).sync().channel();
+
+        InetSocketAddress addr = (InetSocketAddress) sc.localAddress();
         cb.localAddress(addr.getPort());
 
-        Channel sc = sb.bind().sync().channel();
         if (sc instanceof OioDatagramChannel) {
             // skip the test for OIO, as it fails because of
             // No route to host which makes no sense.
@@ -69,7 +73,7 @@ public class DatagramMulticastTest extends AbstractDatagramTest {
         DatagramChannel cc = (DatagramChannel) cb.bind().sync().channel();
 
         String group = "230.0.0.1";
-        InetSocketAddress groupAddress = new InetSocketAddress(group, addr.getPort());
+        InetSocketAddress groupAddress = SocketUtils.socketAddress(group, addr.getPort());
 
         cc.joinGroup(groupAddress, NetUtil.LOOPBACK_IF).sync();
 

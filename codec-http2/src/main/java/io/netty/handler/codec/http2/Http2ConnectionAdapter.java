@@ -15,12 +15,13 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Provides empty implementations of all {@link Http2Connection.Listener} methods.
  */
+@UnstableApi
 public class Http2ConnectionAdapter implements Http2Connection.Listener {
-
     @Override
     public void onStreamAdded(Http2Stream stream) {
     }
@@ -47,17 +48,5 @@ public class Http2ConnectionAdapter implements Http2Connection.Listener {
 
     @Override
     public void onGoAwayReceived(int lastStreamId, long errorCode, ByteBuf debugData) {
-    }
-
-    @Override
-    public void onPriorityTreeParentChanged(Http2Stream stream, Http2Stream oldParent) {
-    }
-
-    @Override
-    public void onPriorityTreeParentChanging(Http2Stream stream, Http2Stream newParent) {
-    }
-
-    @Override
-    public void onWeightChanged(Http2Stream stream, short oldWeight) {
     }
 }

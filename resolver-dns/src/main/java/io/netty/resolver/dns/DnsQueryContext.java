@@ -15,27 +15,29 @@
  */
 package io.netty.resolver.dns;
 
-import io.netty.buffer.Unpooled;
 import io.netty.channel.AddressedEnvelope;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.dns.DatagramDnsQuery;
-import io.netty.handler.codec.dns.DefaultDnsRawRecord;
+import io.netty.handler.codec.dns.AbstractDnsOptPseudoRrRecord;
 import io.netty.handler.codec.dns.DnsQuery;
 import io.netty.handler.codec.dns.DnsQuestion;
 import io.netty.handler.codec.dns.DnsRecord;
-import io.netty.handler.codec.dns.DnsRecordType;
 import io.netty.handler.codec.dns.DnsResponse;
 import io.netty.handler.codec.dns.DnsSection;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.ScheduledFuture;
-import io.netty.util.internal.OneTimeTask;
-import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.TimeUnit;
+
+import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 final class DnsQueryContext {
 
@@ -45,6 +47,7 @@ final class DnsQueryContext {
     private final Promise<AddressedEnvelope<DnsResponse, InetSocketAddress>> promise;
     private final int id;
     private final DnsQuestion question;
+    private final DnsRecord[] additionals;
     private final DnsRecord optResource;
     private final InetSocketAddress nameServerAddr;
 
@@ -53,18 +56,22 @@ final class DnsQueryContext {
 
     DnsQueryContext(DnsNameResolver parent,
                     InetSocketAddress nameServerAddr,
-                    DnsQuestion question, Promise<AddressedEnvelope<DnsResponse, InetSocketAddress>> promise) {
+                    DnsQuestion question,
+                    DnsRecord[] additionals,
+                    Promise<AddressedEnvelope<DnsResponse, InetSocketAddress>> promise) {
 
-        this.parent = parent;
-        this.nameServerAddr = nameServerAddr;
-        this.question = question;
-        this.promise = promise;
+        this.parent = checkNotNull(parent, "parent");
+        this.nameServerAddr = checkNotNull(nameServerAddr, "nameServerAddr");
+        this.question = checkNotNull(question, "question");
+        this.additionals = checkNotNull(additionals, "additionals");
+        this.promise = checkNotNull(promise, "promise");
         recursionDesired = parent.isRecursionDesired();
         id = parent.queryContextManager.add(this);
 
         if (parent.isOptResourceEnabled()) {
-            optResource = new DefaultDnsRawRecord(
-                    StringUtil.EMPTY_STRING, DnsRecordType.OPT, parent.maxPayloadSize(), 0, Unpooled.EMPTY_BUFFER);
+            optResource = new AbstractDnsOptPseudoRrRecord(parent.maxPayloadSize(), 0, 0) {
+                // We may want to remove this in the future and let the user just specify the opt record in the query.
+            };
         } else {
             optResource = null;
         }
@@ -78,42 +85,51 @@ final class DnsQueryContext {
         return question;
     }
 
-    void query() {
+    void query(ChannelPromise writePromise) {
         final DnsQuestion question = question();
         final InetSocketAddress nameServerAddr = nameServerAddr();
         final DatagramDnsQuery query = new DatagramDnsQuery(null, nameServerAddr, id);
+
         query.setRecursionDesired(recursionDesired);
-        query.setRecord(DnsSection.QUESTION, question);
+
+        query.addRecord(DnsSection.QUESTION, question);
+
+        for (DnsRecord record: additionals) {
+            query.addRecord(DnsSection.ADDITIONAL, record);
+        }
+
         if (optResource != null) {
-            query.setRecord(DnsSection.ADDITIONAL, optResource);
+            query.addRecord(DnsSection.ADDITIONAL, optResource);
         }
 
         if (logger.isDebugEnabled()) {
             logger.debug("{} WRITE: [{}: {}], {}", parent.ch, id, nameServerAddr, question);
         }
 
-        sendQuery(query);
+        sendQuery(query, writePromise);
     }
 
-    private void sendQuery(final DnsQuery query) {
-        if (parent.bindFuture.isDone()) {
-            writeQuery(query);
+    private void sendQuery(final DnsQuery query, final ChannelPromise writePromise) {
+        if (parent.channelFuture.isDone()) {
+            writeQuery(query, writePromise);
         } else {
-            parent.bindFuture.addListener(new ChannelFutureListener() {
+            parent.channelFuture.addListener(new GenericFutureListener<Future<? super Channel>>() {
                 @Override
-                public void operationComplete(ChannelFuture future) throws Exception {
+                public void operationComplete(Future<? super Channel> future) throws Exception {
                     if (future.isSuccess()) {
-                        writeQuery(query);
+                        writeQuery(query, writePromise);
                     } else {
-                        promise.tryFailure(future.cause());
+                        Throwable cause = future.cause();
+                        promise.tryFailure(cause);
+                        writePromise.setFailure(cause);
                     }
                 }
             });
         }
     }
 
-    private void writeQuery(final DnsQuery query) {
-        final ChannelFuture writeFuture = parent.ch.writeAndFlush(query);
+    private void writeQuery(final DnsQuery query, final ChannelPromise writePromise) {
+        final ChannelFuture writeFuture = parent.ch.writeAndFlush(query, writePromise);
         if (writeFuture.isDone()) {
             onQueryWriteCompletion(writeFuture);
         } else {
@@ -135,7 +151,7 @@ final class DnsQueryContext {
         // Schedule a query timeout task if necessary.
         final long queryTimeoutMillis = parent.queryTimeoutMillis();
         if (queryTimeoutMillis > 0) {
-            timeoutFuture = parent.ch.eventLoop().schedule(new OneTimeTask() {
+            timeoutFuture = parent.ch.eventLoop().schedule(new Runnable() {
                 @Override
                 public void run() {
                     if (promise.isDone()) {
@@ -178,7 +194,10 @@ final class DnsQueryContext {
             @SuppressWarnings("unchecked")
             AddressedEnvelope<DnsResponse, InetSocketAddress> castResponse =
                     (AddressedEnvelope<DnsResponse, InetSocketAddress>) envelope.retain();
-            promise.setSuccess(castResponse);
+            if (!promise.trySuccess(castResponse)) {
+                // We failed to notify the promise as it was failed before, thus we need to release the envelope
+                envelope.release();
+            }
         }
     }
 

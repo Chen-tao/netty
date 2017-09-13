@@ -28,7 +28,10 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 
-import static io.netty.buffer.Unpooled.*;
+import static io.netty.buffer.Unpooled.EMPTY_BUFFER;
+import static io.netty.buffer.Unpooled.buffer;
+import static io.netty.buffer.Unpooled.compositeBuffer;
+import static io.netty.buffer.Unpooled.wrappedBuffer;
 
 /**
  * Abstract Memory HttpData implementation
@@ -102,12 +105,10 @@ public abstract class AbstractMemoryHttpData extends AbstractHttpData {
                 byteBuf = buffer;
             } else if (byteBuf instanceof CompositeByteBuf) {
                 CompositeByteBuf cbb = (CompositeByteBuf) byteBuf;
-                cbb.addComponent(buffer);
-                cbb.writerIndex(cbb.writerIndex() + buffer.readableBytes());
+                cbb.addComponent(true, buffer);
             } else {
                 CompositeByteBuf cbb = compositeBuffer(Integer.MAX_VALUE);
-                cbb.addComponents(byteBuf, buffer);
-                cbb.writerIndex(byteBuf.readableBytes() + buffer.readableBytes());
+                cbb.addComponents(true, byteBuf, buffer);
                 byteBuf = cbb;
             }
         }
@@ -209,7 +210,7 @@ public abstract class AbstractMemoryHttpData extends AbstractHttpData {
         if (sizeLeft < length) {
             sliceLength = sizeLeft;
         }
-        ByteBuf chunk = byteBuf.slice(chunkPosition, sliceLength).retain();
+        ByteBuf chunk = byteBuf.retainedSlice(chunkPosition, sliceLength);
         chunkPosition += sliceLength;
         return chunk;
     }

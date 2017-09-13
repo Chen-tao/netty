@@ -20,8 +20,10 @@ import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.junit.Test;
 
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.*;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.sameInstance;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 
 public class CipherSuiteConverterTest {
 
@@ -111,6 +113,16 @@ public class CipherSuiteConverterTest {
         testJ2OMapping("TLS_KRB5_EXPORT_WITH_RC2_CBC_40_MD5", "EXP-KRB5-RC2-CBC-MD5");
         testJ2OMapping("TLS_KRB5_EXPORT_WITH_RC2_CBC_40_SHA", "EXP-KRB5-RC2-CBC-SHA");
         testJ2OMapping("TLS_RSA_WITH_AES_256_CBC_SHA", "AES256-SHA");
+
+        // For historical reasons the CHACHA20 ciphers do not follow OpenSSL's custom naming
+        // convention and omits the HMAC algorithm portion of the name.
+        testJ2OMapping("TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "ECDHE-RSA-CHACHA20-POLY1305");
+        testJ2OMapping("TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "ECDHE-ECDSA-CHACHA20-POLY1305");
+        testJ2OMapping("TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "DHE-RSA-CHACHA20-POLY1305");
+        testJ2OMapping("TLS_PSK_WITH_CHACHA20_POLY1305_SHA256", "PSK-CHACHA20-POLY1305");
+        testJ2OMapping("TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256", "ECDHE-PSK-CHACHA20-POLY1305");
+        testJ2OMapping("TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256", "DHE-PSK-CHACHA20-POLY1305");
+        testJ2OMapping("TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256", "RSA-PSK-CHACHA20-POLY1305");
     }
 
     private static void testJ2OMapping(String javaCipherSuite, String openSslCipherSuite) {
@@ -258,6 +270,16 @@ public class CipherSuiteConverterTest {
         testO2JMapping("RSA_WITH_DES_CBC_MD5", "DES-CBC-MD5");
         testO2JMapping("EDH_RSA_EXPORT_WITH_DES_CBC_40_SHA", "EXP-EDH-RSA-DES-CBC-SHA");
         testO2JMapping("EDH_DSS_EXPORT_WITH_DES_CBC_40_SHA", "EXP-EDH-DSS-DES-CBC-SHA");
+
+        // For historical reasons the CHACHA20 ciphers do not follow OpenSSL's custom naming
+        // convention and omits the HMAC algorithm portion of the name.
+        testO2JMapping("ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "ECDHE-RSA-CHACHA20-POLY1305");
+        testO2JMapping("ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "ECDHE-ECDSA-CHACHA20-POLY1305");
+        testO2JMapping("DHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "DHE-RSA-CHACHA20-POLY1305");
+        testO2JMapping("PSK_WITH_CHACHA20_POLY1305_SHA256", "PSK-CHACHA20-POLY1305");
+        testO2JMapping("ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256", "ECDHE-PSK-CHACHA20-POLY1305");
+        testO2JMapping("DHE_PSK_WITH_CHACHA20_POLY1305_SHA256", "DHE-PSK-CHACHA20-POLY1305");
+        testO2JMapping("RSA_PSK_WITH_CHACHA20_POLY1305_SHA256", "RSA-PSK-CHACHA20-POLY1305");
     }
 
     private static void testO2JMapping(String javaCipherSuite, String openSslCipherSuite) {
@@ -269,6 +291,34 @@ public class CipherSuiteConverterTest {
     @Test
     public void testCachedJ2OMappings() {
         testCachedJ2OMapping("TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256", "ECDHE-ECDSA-AES128-SHA256");
+    }
+
+    @Test
+    public void testUnknownOpenSSLCiphersToJava() {
+        testUnknownOpenSSLCiphersToJava("(NONE)");
+        testUnknownOpenSSLCiphersToJava("unknown");
+        testUnknownOpenSSLCiphersToJava("");
+    }
+
+    @Test
+    public void testUnknownJavaCiphersToOpenSSL() {
+        testUnknownJavaCiphersToOpenSSL("(NONE)");
+        testUnknownJavaCiphersToOpenSSL("unknown");
+        testUnknownJavaCiphersToOpenSSL("");
+    }
+
+    private void testUnknownOpenSSLCiphersToJava(String openSslCipherSuite) {
+        CipherSuiteConverter.clearCache();
+
+        assertNull(CipherSuiteConverter.toJava(openSslCipherSuite, "TLS"));
+        assertNull(CipherSuiteConverter.toJava(openSslCipherSuite, "SSL"));
+    }
+
+    private void testUnknownJavaCiphersToOpenSSL(String javaCipherSuite) {
+        CipherSuiteConverter.clearCache();
+
+        assertNull(CipherSuiteConverter.toOpenSsl(javaCipherSuite));
+        assertNull(CipherSuiteConverter.toOpenSsl(javaCipherSuite));
     }
 
     private static void testCachedJ2OMapping(String javaCipherSuite, String openSslCipherSuite) {

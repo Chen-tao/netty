@@ -29,7 +29,8 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class LzmaFrameEncoderTest extends AbstractEncoderTest {
 
@@ -50,16 +51,16 @@ public class LzmaFrameEncoderTest extends AbstractEncoderTest {
         final int dataLength = data.readableBytes();
         int written = 0, length = rand.nextInt(50);
         while (written + length < dataLength) {
-            ByteBuf in = data.slice(written, length);
-            assertTrue(channel.writeOutbound(in.retain()));
+            ByteBuf in = data.retainedSlice(written, length);
+            assertTrue(channel.writeOutbound(in));
             written += length;
             originalLengths.add(length);
             length = rand.nextInt(50);
         }
         length = dataLength - written;
-        ByteBuf in = data.slice(written, dataLength - written);
+        ByteBuf in = data.retainedSlice(written, dataLength - written);
         originalLengths.add(length);
-        assertTrue(channel.writeOutbound(in.retain()));
+        assertTrue(channel.writeOutbound(in));
         assertTrue(channel.finish());
 
         CompositeByteBuf decompressed = Unpooled.compositeBuffer();
@@ -67,9 +68,7 @@ public class LzmaFrameEncoderTest extends AbstractEncoderTest {
         int i = 0;
         while ((msg = channel.readOutbound()) != null) {
             ByteBuf decompressedMsg = decompress(msg, originalLengths.get(i++));
-            decompressed.addComponent(decompressedMsg);
-            decompressed.writerIndex(decompressed.writerIndex() + decompressedMsg.readableBytes());
-            msg.release();
+            decompressed.addComponent(true, decompressedMsg);
         }
         assertEquals(originalLengths.size(), i);
         assertEquals(data, decompressed);
@@ -80,21 +79,32 @@ public class LzmaFrameEncoderTest extends AbstractEncoderTest {
 
     @Override
     protected ByteBuf decompress(ByteBuf compressed, int originalLength) throws Exception {
-        InputStream is = new ByteBufInputStream(compressed);
-        LzmaInputStream lzmaIs = new LzmaInputStream(is, new Decoder());
-
+        InputStream is = new ByteBufInputStream(compressed, true);
+        LzmaInputStream lzmaIs = null;
         byte[] decompressed = new byte[originalLength];
-        int remaining = originalLength;
-        while (remaining > 0) {
-            int read = lzmaIs.read(decompressed, originalLength - remaining, remaining);
-            if (read > 0) {
-                remaining -= read;
-            } else {
-                break;
+        try {
+            lzmaIs = new LzmaInputStream(is, new Decoder());
+            int remaining = originalLength;
+            while (remaining > 0) {
+                int read = lzmaIs.read(decompressed, originalLength - remaining, remaining);
+                if (read > 0) {
+                    remaining -= read;
+                } else {
+                    break;
+                }
+            }
+            assertEquals(-1, lzmaIs.read());
+        } finally {
+            if (lzmaIs != null) {
+                lzmaIs.close();
+            }
+            // LzmaInputStream does not close the stream it wraps, so we should always close.
+            // The close operation should be safe to call multiple times anyways so lets just call it and be safe.
+            // https://github.com/jponge/lzma-java/issues/14
+            if (is != null) {
+                is.close();
             }
         }
-        assertEquals(-1, lzmaIs.read());
-        lzmaIs.close();
 
         return Unpooled.wrappedBuffer(decompressed);
     }

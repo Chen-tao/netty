@@ -22,6 +22,7 @@ import java.nio.ByteOrder;
 import java.util.Random;
 
 import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.Assert.*;
 
 /**
@@ -34,7 +35,7 @@ public class ByteBufDerivationTest {
         ByteBuf buf = Unpooled.buffer(8).setIndex(1, 7);
         ByteBuf slice = buf.slice(1, 7);
 
-        assertThat(slice, instanceOf(SlicedByteBuf.class));
+        assertThat(slice, instanceOf(AbstractUnpooledSlicedByteBuf.class));
         assertThat(slice.unwrap(), sameInstance(buf));
         assertThat(slice.readerIndex(), is(0));
         assertThat(slice.writerIndex(), is(7));
@@ -53,7 +54,7 @@ public class ByteBufDerivationTest {
         ByteBuf slice2 = slice.slice(0, 6);
 
         assertThat(slice2, not(sameInstance(slice)));
-        assertThat(slice2, instanceOf(SlicedByteBuf.class));
+        assertThat(slice2, instanceOf(AbstractUnpooledSlicedByteBuf.class));
         assertThat(slice2.unwrap(), sameInstance(buf));
         assertThat(slice2.writerIndex(), is(6));
         assertThat(slice2.capacity(), is(6));
@@ -156,7 +157,7 @@ public class ByteBufDerivationTest {
         ByteBuf swapped = buf.order(ByteOrder.LITTLE_ENDIAN);
 
         assertThat(swapped, instanceOf(SwappedByteBuf.class));
-        assertThat(swapped.unwrap(), is((ByteBuf) null));
+        assertThat(swapped.unwrap(), sameInstance(buf));
         assertThat(swapped.order(ByteOrder.LITTLE_ENDIAN), sameInstance(swapped));
         assertThat(swapped.order(ByteOrder.BIG_ENDIAN), sameInstance(buf));
 

@@ -21,7 +21,6 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.internal.OneTimeTask;
 import io.netty.util.internal.PlatformDependent;
 
 import java.util.ArrayDeque;
@@ -110,6 +109,11 @@ public class GlobalTrafficShapingHandler extends AbstractTrafficShapingHandler {
         TrafficCounter tc = new TrafficCounter(this, executor, "GlobalTC", checkInterval);
         setTrafficCounter(tc);
         tc.start();
+    }
+
+    @Override
+    protected int userDefinedWritabilityIndex() {
+        return AbstractTrafficShapingHandler.GLOBAL_DEFAULT_USER_DEFINED_WRITABILITY_INDEX;
     }
 
     /**
@@ -329,7 +333,7 @@ public class GlobalTrafficShapingHandler extends AbstractTrafficShapingHandler {
         Integer key = channel.hashCode();
         PerChannel perChannel = channelQueues.get(key);
         if (perChannel == null) {
-            // in case write occurs before handlerAdded is raized for this handler
+            // in case write occurs before handlerAdded is raised for this handler
             // imply a synchronized only if needed
             perChannel = getOrSetPerChannel(ctx);
         }
@@ -361,7 +365,7 @@ public class GlobalTrafficShapingHandler extends AbstractTrafficShapingHandler {
         }
         final long futureNow = newToSend.relativeTimeAction;
         final PerChannel forSchedule = perChannel;
-        ctx.executor().schedule(new OneTimeTask() {
+        ctx.executor().schedule(new Runnable() {
             @Override
             public void run() {
                 sendAllValid(ctx, forSchedule, futureNow);

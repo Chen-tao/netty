@@ -20,14 +20,17 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import org.junit.Test;
 
-import java.net.BindException;
+import java.net.InetSocketAddress;
+import java.nio.channels.NotYetConnectedException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -36,14 +39,18 @@ import static org.junit.Assert.*;
 public class DatagramUnicastTest extends AbstractDatagramTest {
 
     private static final byte[] BYTES = {0, 1, 2, 3};
+    private enum WrapType {
+        NONE, DUP, SLICE, READ_ONLY
+    }
+
     @Test
     public void testSimpleSendDirectByteBuf() throws Throwable {
         run();
     }
 
     public void testSimpleSendDirectByteBuf(Bootstrap sb, Bootstrap cb) throws Throwable {
-        testSimpleSend0(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), true, BYTES, 1);
-        testSimpleSend0(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), true, BYTES, 4);
+        testSimpleSend(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), true, BYTES, 1);
+        testSimpleSend(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), true, BYTES, 4);
     }
 
     @Test
@@ -52,8 +59,8 @@ public class DatagramUnicastTest extends AbstractDatagramTest {
     }
 
     public void testSimpleSendHeapByteBuf(Bootstrap sb, Bootstrap cb) throws Throwable {
-        testSimpleSend0(sb, cb, Unpooled.buffer().writeBytes(BYTES), true, BYTES, 1);
-        testSimpleSend0(sb, cb, Unpooled.buffer().writeBytes(BYTES), true, BYTES, 4);
+        testSimpleSend(sb, cb, Unpooled.buffer().writeBytes(BYTES), true, BYTES, 1);
+        testSimpleSend(sb, cb, Unpooled.buffer().writeBytes(BYTES), true, BYTES, 4);
     }
 
     @Test
@@ -63,16 +70,14 @@ public class DatagramUnicastTest extends AbstractDatagramTest {
 
     public void testSimpleSendCompositeDirectByteBuf(Bootstrap sb, Bootstrap cb) throws Throwable {
         CompositeByteBuf buf = Unpooled.compositeBuffer();
-        buf.addComponent(Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
-        buf.addComponent(Unpooled.directBuffer().writeBytes(BYTES, 2, 2));
-        buf.writerIndex(4);
-        testSimpleSend0(sb, cb, buf, true, BYTES, 1);
+        buf.addComponent(true, Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
+        buf.addComponent(true, Unpooled.directBuffer().writeBytes(BYTES, 2, 2));
+        testSimpleSend(sb, cb, buf, true, BYTES, 1);
 
         CompositeByteBuf buf2 = Unpooled.compositeBuffer();
-        buf2.addComponent(Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
-        buf2.addComponent(Unpooled.directBuffer().writeBytes(BYTES, 2, 2));
-        buf2.writerIndex(4);
-        testSimpleSend0(sb, cb, buf2, true, BYTES, 4);
+        buf2.addComponent(true, Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
+        buf2.addComponent(true, Unpooled.directBuffer().writeBytes(BYTES, 2, 2));
+        testSimpleSend(sb, cb, buf2, true, BYTES, 4);
     }
 
     @Test
@@ -82,16 +87,14 @@ public class DatagramUnicastTest extends AbstractDatagramTest {
 
     public void testSimpleSendCompositeHeapByteBuf(Bootstrap sb, Bootstrap cb) throws Throwable {
         CompositeByteBuf buf = Unpooled.compositeBuffer();
-        buf.addComponent(Unpooled.buffer().writeBytes(BYTES, 0, 2));
-        buf.addComponent(Unpooled.buffer().writeBytes(BYTES, 2, 2));
-        buf.writerIndex(4);
-        testSimpleSend0(sb, cb, buf, true, BYTES, 1);
+        buf.addComponent(true, Unpooled.buffer().writeBytes(BYTES, 0, 2));
+        buf.addComponent(true, Unpooled.buffer().writeBytes(BYTES, 2, 2));
+        testSimpleSend(sb, cb, buf, true, BYTES, 1);
 
         CompositeByteBuf buf2 = Unpooled.compositeBuffer();
-        buf2.addComponent(Unpooled.buffer().writeBytes(BYTES, 0, 2));
-        buf2.addComponent(Unpooled.buffer().writeBytes(BYTES, 2, 2));
-        buf2.writerIndex(4);
-        testSimpleSend0(sb, cb, buf2, true, BYTES, 4);
+        buf2.addComponent(true, Unpooled.buffer().writeBytes(BYTES, 0, 2));
+        buf2.addComponent(true, Unpooled.buffer().writeBytes(BYTES, 2, 2));
+        testSimpleSend(sb, cb, buf2, true, BYTES, 4);
     }
 
     @Test
@@ -101,16 +104,14 @@ public class DatagramUnicastTest extends AbstractDatagramTest {
 
     public void testSimpleSendCompositeMixedByteBuf(Bootstrap sb, Bootstrap cb) throws Throwable {
         CompositeByteBuf buf = Unpooled.compositeBuffer();
-        buf.addComponent(Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
-        buf.addComponent(Unpooled.buffer().writeBytes(BYTES, 2, 2));
-        buf.writerIndex(4);
-        testSimpleSend0(sb, cb, buf, true, BYTES, 1);
+        buf.addComponent(true, Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
+        buf.addComponent(true, Unpooled.buffer().writeBytes(BYTES, 2, 2));
+        testSimpleSend(sb, cb, buf, true, BYTES, 1);
 
         CompositeByteBuf buf2 = Unpooled.compositeBuffer();
-        buf2.addComponent(Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
-        buf2.addComponent(Unpooled.buffer().writeBytes(BYTES, 2, 2));
-        buf2.writerIndex(4);
-        testSimpleSend0(sb, cb, buf2, true, BYTES, 4);
+        buf2.addComponent(true, Unpooled.directBuffer().writeBytes(BYTES, 0, 2));
+        buf2.addComponent(true, Unpooled.buffer().writeBytes(BYTES, 2, 2));
+        testSimpleSend(sb, cb, buf2, true, BYTES, 4);
     }
 
     @Test
@@ -119,33 +120,95 @@ public class DatagramUnicastTest extends AbstractDatagramTest {
     }
 
     public void testSimpleSendWithoutBind(Bootstrap sb, Bootstrap cb) throws Throwable {
-        testSimpleSend0(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), false, BYTES, 1);
-        testSimpleSend0(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), false, BYTES, 4);
+        testSimpleSend(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), false, BYTES, 1);
+        testSimpleSend(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), false, BYTES, 4);
+    }
+
+    private void testSimpleSend(Bootstrap sb, Bootstrap cb, ByteBuf buf, boolean bindClient,
+                                final byte[] bytes, int count) throws Throwable {
+        for (WrapType type: WrapType.values()) {
+            testSimpleSend0(sb, cb, buf.retain(), bindClient, bytes, count, type);
+        }
+        assertTrue(buf.release());
+    }
+
+    @Test
+    public void testSimpleSendWithConnect() throws Throwable {
+        run();
+    }
+
+    public void testSimpleSendWithConnect(Bootstrap sb, Bootstrap cb) throws Throwable {
+        testSimpleSendWithConnect(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), BYTES, 1);
+        testSimpleSendWithConnect(sb, cb, Unpooled.directBuffer().writeBytes(BYTES), BYTES, 4);
     }
 
     @SuppressWarnings("deprecation")
     private void testSimpleSend0(Bootstrap sb, Bootstrap cb, ByteBuf buf, boolean bindClient,
-                                 final byte[] bytes, int count)
+                                final byte[] bytes, int count, WrapType wrapType)
             throws Throwable {
-        final CountDownLatch latch = new CountDownLatch(count);
+        Channel sc = null;
+        Channel cc = null;
 
-        sb.handler(new ChannelInitializer<Channel>() {
-            @Override
-            protected void initChannel(Channel ch) throws Exception {
-                ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
-                    @Override
-                    public void channelRead0(ChannelHandlerContext ctx, DatagramPacket msg) throws Exception {
-                        ByteBuf buf = msg.content();
-                        assertEquals(bytes.length, buf.readableBytes());
-                        for (byte b: bytes) {
-                            assertEquals(b, buf.readByte());
-                        }
-                        latch.countDown();
-                    }
-                });
+        try {
+            cb.handler(new SimpleChannelInboundHandler<Object>() {
+                @Override
+                public void channelRead0(ChannelHandlerContext ctx, Object msgs) throws Exception {
+                    // Nothing will be sent.
+                }
+            });
+
+            final CountDownLatch latch = new CountDownLatch(count);
+            sc = setupServerChannel(sb, bytes, latch);
+            if (bindClient) {
+                cc = cb.bind(newSocketAddress()).sync().channel();
+            } else {
+                cb.option(ChannelOption.DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION, true);
+                cc = cb.register().sync().channel();
             }
-        });
+            InetSocketAddress addr = (InetSocketAddress) sc.localAddress();
+            for (int i = 0; i < count; i++) {
+                switch (wrapType) {
+                    case DUP:
+                        cc.write(new DatagramPacket(buf.retainedDuplicate(), addr));
+                        break;
+                    case SLICE:
+                        cc.write(new DatagramPacket(buf.retainedSlice(), addr));
+                        break;
+                    case READ_ONLY:
+                        cc.write(new DatagramPacket(buf.retain().asReadOnly(), addr));
+                        break;
+                    case NONE:
+                        cc.write(new DatagramPacket(buf.retain(), addr));
+                        break;
+                    default:
+                        throw new Error("unknown wrap type: " + wrapType);
+                }
+            }
+            // release as we used buf.retain() before
+            cc.flush();
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
+        } finally {
+            // release as we used buf.retain() before
+            buf.release();
 
+            closeChannel(cc);
+            closeChannel(sc);
+        }
+    }
+
+    private void testSimpleSendWithConnect(Bootstrap sb, Bootstrap cb, ByteBuf buf, final byte[] bytes, int count)
+            throws Throwable {
+        try {
+            for (WrapType type : WrapType.values()) {
+                testSimpleSendWithConnect0(sb, cb, buf.retain(), bytes, count, type);
+            }
+        } finally {
+            assertTrue(buf.release());
+        }
+    }
+
+    private void testSimpleSendWithConnect0(Bootstrap sb, Bootstrap cb, ByteBuf buf, final byte[] bytes, int count,
+                                            WrapType wrapType) throws Throwable {
         cb.handler(new SimpleChannelInboundHandler<Object>() {
             @Override
             public void channelRead0(ChannelHandlerContext ctx, Object msgs) throws Exception {
@@ -154,43 +217,77 @@ public class DatagramUnicastTest extends AbstractDatagramTest {
         });
 
         Channel sc = null;
-        BindException bindFailureCause = null;
-        for (int i = 0; i < 3; i ++) {
-            try {
-                sc = sb.bind().sync().channel();
-                break;
-            } catch (Exception e) {
-                if (e instanceof BindException) {
-                    logger.warn("Failed to bind to a free port; trying again", e);
-                    bindFailureCause = (BindException) e;
-                    refreshLocalAddress(sb);
-                } else {
-                    throw e;
+        DatagramChannel cc = null;
+        try {
+            final CountDownLatch latch = new CountDownLatch(count);
+            sc = setupServerChannel(sb, bytes, latch);
+            cc = (DatagramChannel) cb.connect(sc.localAddress()).sync().channel();
+
+            for (int i = 0; i < count; i++) {
+                switch (wrapType) {
+                    case DUP:
+                        cc.write(buf.retainedDuplicate());
+                        break;
+                    case SLICE:
+                        cc.write(buf.retainedSlice());
+                        break;
+                    case READ_ONLY:
+                        cc.write(buf.retain().asReadOnly());
+                        break;
+                    case NONE:
+                        cc.write(buf.retain());
+                        break;
+                    default:
+                        throw new Error("unknown wrap type: " + wrapType);
                 }
             }
-        }
+            cc.flush();
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
 
-        if (sc == null) {
-            throw bindFailureCause;
-        }
+            assertTrue(cc.isConnected());
 
-        Channel cc;
-        if (bindClient) {
-            cc = cb.bind().sync().channel();
-        } else {
-            cb.option(ChannelOption.DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION, true);
-            cc = cb.register().sync().channel();
-        }
+            // Test what happens when we call disconnect()
+            cc.disconnect().syncUninterruptibly();
+            assertFalse(cc.isConnected());
 
-        for (int i = 0; i < count; i++) {
-            cc.write(new DatagramPacket(buf.retain().duplicate(), addr));
-        }
-        // release as we used buf.retain() before
-        buf.release();
-        cc.flush();
-        assertTrue(latch.await(10, TimeUnit.SECONDS));
+            ChannelFuture future = cc.writeAndFlush(
+                    buf.retain().duplicate()).awaitUninterruptibly();
+            assertTrue("NotYetConnectedException expected, got: " + future.cause(),
+                    future.cause() instanceof NotYetConnectedException);
+        } finally {
+            // release as we used buf.retain() before
+            buf.release();
 
-        sc.close().sync();
-        cc.close().sync();
+            closeChannel(cc);
+            closeChannel(sc);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private Channel setupServerChannel(Bootstrap sb, final byte[] bytes, final CountDownLatch latch)
+            throws Throwable {
+        sb.handler(new ChannelInitializer<Channel>() {
+            @Override
+            protected void initChannel(Channel ch) throws Exception {
+                ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
+                    @Override
+                    public void channelRead0(ChannelHandlerContext ctx, DatagramPacket msg) throws Exception {
+                        ByteBuf buf = msg.content();
+                        assertEquals(bytes.length, buf.readableBytes());
+                        for (byte b : bytes) {
+                            assertEquals(b, buf.readByte());
+                        }
+                        latch.countDown();
+                    }
+                });
+            }
+        });
+        return sb.bind(newSocketAddress()).sync().channel();
+    }
+
+    private static void closeChannel(Channel channel) throws Exception {
+        if (channel != null) {
+            channel.close().sync();
+        }
     }
 }
